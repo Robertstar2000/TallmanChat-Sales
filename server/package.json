@@ -1,0 +1,25 @@
+{
+  "name": "tallman-ldap-auth",
+  "version": "1.0.0",
+  "description": "LDAP authentication service for Tallman Chat",
+  "main": "backend-server.js",
+  "scripts": {
+    "start": "node backend-server.js",
+    "ldap": "node ldap-auth.js",
+    "dev": "nodemon backend-server.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "ldapjs": "^3.0.5",
+    "node-fetch": "^2.7.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "keywords": ["ldap", "authentication", "tallman"],
+  "author": "Tallman Equipment",
+  "license": "MIT"
+}

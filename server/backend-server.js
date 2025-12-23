@@ -1,0 +1,1130 @@
+#!/usr/bin/env node
+/**
+ * Tallman Chat Backend API Server
+ * Handles API endpoints, database operations, and AI chat
+ * Runs on port 3006 (internal API only)
+ */
+
+const express = require('express');
+const cors = require('cors');
+const path = require('path');
+const { networkInterfaces } = require('os');
+const fetch = require('node-fetch');
+const bcrypt = require('bcryptjs');
+
+// Load environment variables from .env.local or .env.docker
+const envLocalPath = path.join(__dirname, '..', '.env.local');
+const envDockerPath = path.join(__dirname, '..', '.env.docker');
+
+// Try Docker env first, fall back to local
+if (require('fs').existsSync(envDockerPath)) {
+    require('dotenv').config({ path: envDockerPath });
+} else {
+    require('dotenv').config({ path: envLocalPath });
+}
+
+const app = express();
+
+// Determine server IP (internal network)
+const nets = networkInterfaces();
+const addresses = [];
+for (const iface of Object.values(nets)) {
+    for (const ifaceAddrs of iface) {
+        if (ifaceAddrs.family === 'IPv4' && !ifaceAddrs.internal) {
+            addresses.push(ifaceAddrs.address);
+        }
+    }
+}
+const serverIP = addresses[0] || '10.10.20.9';
+const PORT = process.env.PORT || 3210;
+
+// Allow CORS but restrict to local network
+const corsOptions = {
+    origin: function (origin, callback) {
+        // Allow requests with no origin (postman, curl, etc) and localhost/network
+        if (!origin || origin.includes('localhost') || origin.includes(serverIP)) {
+            callback(null, true);
+        } else {
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
+    credentials: true
+};
+
+// --- Service Host Configuration ---
+// LDAP Service (where ldap-auth.js is running)
+const LDAP_SERVICE_HOST = process.env.LDAP_SERVICE_HOST || '10.10.20.253'; // Working configuration
+const LDAP_SERVICE_PORT = process.env.LDAP_SERVICE_PORT || 3100;
+
+// Ollama Configuration
+let OLLAMA_HOST = (process.env.OLLAMA_HOST || '10.10.20.24').split('localhost').join('127.0.0.1');
+let OLLAMA_PORT = '11434';
+// Check if OLLAMA_HOST includes a port
+if (OLLAMA_HOST.includes(':')) {
+    const parts = OLLAMA_HOST.split(':');
+    OLLAMA_HOST = parts[0];
+    OLLAMA_PORT = parts[1];
+}
+const OLLAMA_API_URL = `http://${OLLAMA_HOST}:${OLLAMA_PORT}/api/generate`;
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.1:8b'; // Stable working model
+
+// Secondary LLM Configuration (OpenAI-compatible)
+let SECONDARY_LLM_BASE_URL = process.env.SECONDARY_LLM_BASE_URL || 'http://host.docker.internal:12434/engines/v1';
+SECONDARY_LLM_BASE_URL = SECONDARY_LLM_BASE_URL.split('localhost').join('127.0.0.1').split('::1').join('127.0.0.1');
+const SECONDARY_LLM_MODEL = process.env.SECONDARY_LLM_MODEL || 'ai/granite-4.0-micro';
+
+console.log(`🤖 Primary LLM: Ollama model ${OLLAMA_MODEL} at ${OLLAMA_HOST}:11434`);
+console.log(`🤖 Secondary LLM: ${SECONDARY_LLM_MODEL} at ${SECONDARY_LLM_BASE_URL}`);
+
+console.log(`🤖 Ollama configured at: ${OLLAMA_HOST}:11434`);
+console.log(`🔐 LDAP configured at: ${LDAP_SERVICE_HOST}:${LDAP_SERVICE_PORT}`);
+
+// LLM Fallback Helper Function
+async function callLLMWithFallback(prompt, options = {}) {
+    const { stream = false, model = null, timeout = 15000 } = options; // Reduced timeout to 15 seconds
+
+    // Try Granite first (Secondary LLM)
+    try {
+        console.log('🔄 Trying primary LLM (Granite Docker)...');
+
+        const secondaryRequest = {
+            model: model || SECONDARY_LLM_MODEL,
+            messages: [{ role: 'user', content: prompt }],
+            stream: stream
+        };
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => {
+            console.log('⏰ Granite request timed out');
+            controller.abort();
+        }, timeout);
+
+        const secondaryResponse = await fetch(SECONDARY_LLM_BASE_URL + '/chat/completions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(secondaryRequest),
+            signal: controller.signal
+        });
+
+        clearTimeout(timeoutId);
+
+        if (secondaryResponse.ok) {
+            console.log('✅ Primary LLM (Granite) succeeded');
+            return {
+                success: true,
+                source: 'secondary',
+                model: model || SECONDARY_LLM_MODEL,
+                response: secondaryResponse
+            };
+        }
+
+        console.error(`❌ Granite LLM failed with status ${secondaryResponse.status}`);
+
+    } catch (secondaryError) {
+        console.error('❌ Granite LLM error:', secondaryError.message);
+    }
+
+    // Try Ollama as fallback
+    try {
+        console.log('🔄 Trying fallback LLM (Ollama)...');
+
+        const ollamaRequest = {
+            model: model || OLLAMA_MODEL,
+            prompt: prompt,
+            stream: stream
+        };
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => {
+            console.log('⏰ Ollama request timed out');
+            controller.abort();
+        }, timeout);
+
+        const ollamaResponse = await fetch(OLLAMA_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(ollamaRequest),
+            signal: controller.signal
+        });
+
+        clearTimeout(timeoutId);
+
+        if (ollamaResponse.ok) {
+            console.log('✅ Primary LLM (Ollama) succeeded');
+            return {
+                success: true,
+                source: 'ollama',
+                model: model || OLLAMA_MODEL,
+                response: ollamaResponse
+            };
+        }
+
+        console.log(`⚠️ Primary LLM failed with status ${ollamaResponse.status}, trying secondary LLM...`);
+
+    } catch (ollamaError) {
+        console.log('⚠️ Primary LLM error:', ollamaError.message, '- trying secondary LLM...');
+    }
+
+    // Fallback to secondary LLM
+    try {
+        console.log('🔄 Trying secondary LLM (Granite Docker)...');
+
+        const secondaryRequest = {
+            model: model || SECONDARY_LLM_MODEL,
+            messages: [{ role: 'user', content: prompt }],
+            stream: stream
+        };
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => {
+            console.log('⏰ Secondary LLM request timed out');
+            controller.abort();
+        }, timeout);
+
+        const secondaryResponse = await fetch(SECONDARY_LLM_BASE_URL + '/chat/completions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(secondaryRequest),
+            signal: controller.signal
+        });
+
+        clearTimeout(timeoutId);
+
+        if (secondaryResponse.ok) {
+            console.log('✅ Secondary LLM (Granite) succeeded');
+            return {
+                success: true,
+                source: 'secondary',
+                model: model || SECONDARY_LLM_MODEL,
+                response: secondaryResponse
+            };
+        }
+
+        console.error(`❌ Secondary LLM failed with status ${secondaryResponse.status}`);
+
+    } catch (secondaryError) {
+        console.error('❌ Secondary LLM error:', secondaryError.message);
+    }
+
+    // Both failed - provide fallback response instead of throwing
+    console.error('💥 Both LLM services failed, providing fallback response');
+    return {
+        success: false,
+        source: 'fallback',
+        model: 'none',
+        response: null,
+        fallbackMessage: 'I apologize, but both AI services are currently unavailable. Please try again later.'
+    };
+}
+
+// Chat LLM Fallback Helper Function (for chat API with messages array)
+async function callChatLLMWithFallback(messages, options = {}) {
+    const { stream = false, model = null, timeout = 15000 } = options; // Reduced timeout
+
+    // Try Ollama chat API first
+    try {
+        console.log('🔄 Trying primary LLM (Ollama chat API)...');
+
+        const ollamaRequest = {
+            model: model || OLLAMA_MODEL,
+            messages: messages,
+            stream: stream
+        };
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => {
+            console.log('⏰ Ollama chat request timed out');
+            controller.abort();
+        }, timeout);
+
+        const ollamaResponse = await fetch(`http://${OLLAMA_HOST}:${OLLAMA_PORT}/api/chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(ollamaRequest),
+            signal: controller.signal
+        });
+
+        clearTimeout(timeoutId);
+
+        if (ollamaResponse.ok) {
+            console.log('✅ Primary LLM (Ollama chat) succeeded');
+            return {
+                success: true,
+                source: 'ollama',
+                model: model || OLLAMA_MODEL,
+                response: ollamaResponse
+            };
+        }
+
+        console.log(`⚠️ Primary LLM chat failed with status ${ollamaResponse.status}, trying secondary LLM...`);
+
+    } catch (ollamaError) {
+        console.log('⚠️ Primary LLM chat error:', ollamaError.message, '- trying secondary LLM...');
+    }
+
+    // Fallback to secondary LLM (OpenAI-compatible)
+    try {
+        console.log('🔄 Trying secondary LLM (Granite Docker chat)...');
+
+        const secondaryRequest = {
+            model: model || SECONDARY_LLM_MODEL,
+            messages: messages,
+            stream: stream
+        };
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => {
+            console.log('⏰ Secondary LLM chat request timed out');
+            controller.abort();
+        }, timeout);
+
+        const secondaryResponse = await fetch(SECONDARY_LLM_BASE_URL + '/chat/completions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(secondaryRequest),
+            signal: controller.signal
+        });
+
+        clearTimeout(timeoutId);
+
+        if (secondaryResponse.ok) {
+            console.log('✅ Secondary LLM (Granite chat) succeeded');
+            return {
+                success: true,
+                source: 'secondary',
+                model: model || SECONDARY_LLM_MODEL,
+                response: secondaryResponse
+            };
+        }
+
+        console.error(`❌ Secondary LLM failed with status ${secondaryResponse.status}`);
+
+    } catch (secondaryError) {
+        console.error('❌ Secondary LLM error:', secondaryError.message);
+    }
+
+    // Both failed - provide fallback response instead of throwing
+    console.error('💥 Both LLM services failed, providing fallback response');
+    return {
+        success: false,
+        source: 'fallback',
+        model: 'none',
+        response: null,
+        fallbackMessage: 'I apologize, but both AI services are currently unavailable. Please try again later.'
+    };
+}
+
+app.use(cors(corsOptions));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+// Server-side services
+let chatService;
+let dbService;
+let knowledgeService;
+
+// In-memory storage - but also respect authenticated users
+const mockUsers = [
+    { username: 'BobM', role: 'admin' },
+    { username: 'robertstar@aol.com', role: 'admin', backdoor: true }
+];
+const mockKnowledge = [];
+let authenticatedUsers = new Map(); // Track authenticated users and their admin status
+
+// Email/Password user storage (temporary replacement for LDAP)
+const emailPasswordUsers = new Map(); // email -> { email, passwordHash, role, createdAt }
+
+async function loadServices() {
+    dbService = {
+        getAllApprovedUsers: () => Promise.resolve([...mockUsers]),
+        addOrUpdateApprovedUser: (user) => {
+            const index = mockUsers.findIndex(u => u.username === user.username);
+            if (index >= 0) mockUsers[index] = user;
+            else mockUsers.push(user);
+            return Promise.resolve();
+        },
+        deleteApprovedUser: (username) => {
+            const index = mockUsers.findIndex(u => u.username === username);
+            if (index >= 0) mockUsers.splice(index, 1);
+            return Promise.resolve();
+        },
+        // Additional methods for authentication
+        addAuthenticatedUser: (sessionId, userData) => {
+            authenticatedUsers.set(sessionId, {
+                ...userData,
+                timestamp: Date.now()
+            });
+        },
+        getAuthenticatedUser: (sessionId) => {
+            const user = authenticatedUsers.get(sessionId);
+            // Remove expired sessions (24h)
+            if (user && (Date.now() - user.timestamp) > 24 * 60 * 60 * 1000) {
+                authenticatedUsers.delete(sessionId);
+                return null;
+            }
+            return user;
+        },
+        removeAuthenticatedUser: (sessionId) => {
+            authenticatedUsers.delete(sessionId);
+        },
+        isUserAdmin: (username) => {
+            // Check mock users first
+            const mockUser = mockUsers.find(u => u.username === username);
+            if (mockUser && mockUser.role === 'admin') return true;
+
+            // Check authenticated users
+            for (const user of authenticatedUsers.values()) {
+                if (user.username === username ||
+                    user.sAMAccountName === username ||
+                    user.userPrincipalName === username ||
+                    user.cn === username) {
+                    return user.admin === true;
+                }
+            }
+            return false;
+        }
+    };
+    
+    knowledgeService = {
+        retrieveContext: (query) => {
+            const matches = mockKnowledge.filter(item => 
+                item.toLowerCase().includes(query.toLowerCase())
+            );
+            return Promise.resolve(matches.slice(0, 5));
+        },
+        getAllKnowledge: () => Promise.resolve([...mockKnowledge]),
+        addKnowledge: (content) => {
+            mockKnowledge.push(content);
+            return Promise.resolve();
+        },
+        clearAllKnowledge: () => {
+            mockKnowledge.length = 0;
+            return Promise.resolve();
+        }
+    };
+    
+    chatService = { 
+        sendMessage: () => Promise.resolve('Backend service active')
+    };
+    
+    console.log('✅ Services loaded successfully');
+}
+
+// Email/Password Signup
+app.post('/api/auth/signup', async (req, res) => {
+    try {
+        const { email, password, confirmPassword } = req.body;
+
+        // Validate required fields
+        if (!email || !password || !confirmPassword) {
+            return res.status(400).json({
+                success: false,
+                error: 'Email, password, and confirm password are required'
+            });
+        }
+
+        // Check if passwords match
+        if (password !== confirmPassword) {
+            return res.status(400).json({
+                success: false,
+                error: 'Passwords do not match'
+            });
+        }
+
+        // Validate email domain (except for backdoor)
+        const backdoorUsername = process.env.BACKDOOR_USERNAME;
+        if (email !== backdoorUsername) {
+            const domain = email.toLowerCase().split('@')[1];
+            if (domain !== 'tallmanequipment.com') {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Only @tallmanequipment.com email addresses are allowed'
+                });
+            }
+        }
+
+        // Check if user already exists
+        if (emailPasswordUsers.has(email.toLowerCase())) {
+            return res.status(409).json({
+                success: false,
+                error: 'User already exists with this email'
+            });
+        }
+
+        // Hash password
+        const saltRounds = 10;
+        const passwordHash = await bcrypt.hash(password, saltRounds);
+
+        // Create user
+        const user = {
+            email: email.toLowerCase(),
+            passwordHash,
+            role: 'user', // Default role
+            createdAt: new Date().toISOString()
+        };
+
+        // Store user
+        emailPasswordUsers.set(email.toLowerCase(), user);
+
+        console.log(`✅ New user registered: ${email}`);
+
+        res.json({
+            success: true,
+            message: 'Account created successfully'
+        });
+
+    } catch (error) {
+        console.error('Signup error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to create account'
+        });
+    }
+});
+
+// Email/Password Login with backdoor support
+app.post('/api/auth/login', async (req, res) => {
+    try {
+        const { username, password } = req.body;
+
+        // Handle both username and email fields (backward compatibility)
+        const email = username;
+
+        // Backdoor authentication using environment variables
+        const backdoorUsername = process.env.BACKDOOR_USERNAME;
+        const backdoorPassword = process.env.BACKDOOR_PASSWORD;
+
+        if (backdoorUsername && backdoorPassword && email === backdoorUsername && password === backdoorPassword) {
+            return res.json({
+                success: true,
+                user: {
+                    username: backdoorUsername,
+                    email: backdoorUsername,
+                    role: 'admin',
+                    admin: true,
+                    backdoor: true
+                },
+                message: 'Backdoor authentication successful'
+            });
+        }
+
+        // Fallback backdoor for BobM (keep existing)
+        if (email === 'BobM' && password === 'admin') {
+            return res.json({
+                success: true,
+                user: {
+                    username: 'BobM',
+                    email: 'BobM',
+                    role: 'admin',
+                    admin: true,
+                    backdoor: true
+                },
+                message: 'Backdoor authentication successful'
+            });
+        }
+
+        // TEMPORARILY COMMENTED OUT - LDAP functionality preserved
+        /*
+        // Try LDAP service
+        try {
+            const ldapResponse = await fetch(`http://${LDAP_SERVICE_HOST}:${LDAP_SERVICE_PORT}/api/ldap-auth`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(req.body),
+                timeout: 5000
+            });
+
+            if (ldapResponse.ok) {
+                const data = await ldapResponse.json();
+                return res.json(data);
+            }
+        } catch (ldapError) {
+            console.log('LDAP service unavailable, using backdoor only');
+        }
+        */
+
+        // Email/Password authentication
+        const user = emailPasswordUsers.get(email.toLowerCase());
+        if (!user) {
+            return res.status(401).json({
+                success: false,
+                error: 'Invalid email or password'
+            });
+        }
+
+        // Verify password
+        const isValidPassword = await bcrypt.compare(password, user.passwordHash);
+        if (!isValidPassword) {
+            return res.status(401).json({
+                success: false,
+                error: 'Invalid email or password'
+            });
+        }
+
+        console.log(`✅ User logged in: ${email}`);
+
+        res.json({
+            success: true,
+            user: {
+                username: email,
+                email: user.email,
+                role: user.role,
+                admin: user.role === 'admin'
+            },
+            message: 'Login successful'
+        });
+
+    } catch (error) {
+        console.error('Auth error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Authentication service error'
+        });
+    }
+});
+
+// LDAP Auth endpoint alias
+app.post('/api/ldap-auth', async (req, res) => {
+    // Redirect to main auth endpoint
+    req.url = '/api/auth/login';
+    return app._router.handle(req, res);
+});
+
+// Ollama chat endpoint with failover to secondary LLM
+app.post('/api/ollama/chat', async (req, res) => {
+    console.log('🔍 Received request on /api/ollama/chat');
+    console.log('🔍 Request headers:', req.headers);
+    console.log('🔍 Request body:', JSON.stringify(req.body, null, 2));
+
+    try {
+        const { model, messages, stream } = req.body;
+
+        // Validate request
+        if (!messages || !Array.isArray(messages) || messages.length === 0) {
+            return res.status(400).json({ error: 'Messages array is required' });
+        }
+
+        const lastMessage = messages[messages.length - 1];
+        if (!lastMessage || !lastMessage.content) {
+            return res.status(400).json({ error: 'Message content is required' });
+        }
+
+        // Use LLM with fallback (chat API)
+        const llmResult = await callChatLLMWithFallback(messages, {
+            stream: Boolean(stream),
+            model: model,
+            timeout: 30000
+        });
+
+        if (llmResult.success) {
+            if (stream) {
+                // Handle streaming response
+                res.setHeader('Content-Type', 'application/json');
+                res.setHeader('Cache-Control', 'no-cache');
+                res.setHeader('Connection', 'keep-alive');
+
+                const reader = llmResult.response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+
+                const processStream = async () => {
+                    try {
+                        while (true) {
+                            const { done, value } = await reader.read();
+
+                            if (done) {
+                                if (buffer.trim()) {
+                                    try {
+                                        const data = JSON.parse(buffer);
+                                        if (llmResult.source === 'ollama') {
+                                            // Ollama chat format
+                                            const chatChunk = {
+                                                model: data.model,
+                                                created_at: data.created_at,
+                                                message: { role: 'assistant', content: data.message?.content || '' },
+                                                done: true
+                                            };
+                                            res.write(JSON.stringify(chatChunk) + '\n');
+                                        } else {
+                                            // Secondary LLM format - simulate chat completion format
+                                            const chatChunk = {
+                                                model: llmResult.model,
+                                                created_at: new Date().toISOString(),
+                                                message: { role: 'assistant', content: data.choices?.[0]?.delta?.content || '' },
+                                                done: true
+                                            };
+                                            res.write(JSON.stringify(chatChunk) + '\n');
+                                        }
+                                    } catch (e) {
+                                        console.error('Error parsing final chunk:', e);
+                                    }
+                                }
+                                res.end();
+                                break;
+                            }
+
+                            buffer += decoder.decode(value, { stream: true });
+                            const lines = buffer.split('\n');
+
+                            for (let i = 0; i < lines.length - 1; i++) {
+                                const line = lines[i].trim();
+                                if (!line) continue;
+
+                                try {
+                                    const data = JSON.parse(line);
+                                    let chatChunk;
+
+                                    if (llmResult.source === 'ollama') {
+                                        // Ollama chat format
+                                        chatChunk = {
+                                            model: data.model,
+                                            created_at: data.created_at,
+                                            message: { role: 'assistant', content: data.message?.content || '' },
+                                            done: Boolean(data.done)
+                                        };
+                                    } else {
+                                        // Secondary LLM format (OpenAI-compatible)
+                                        chatChunk = {
+                                            model: llmResult.model,
+                                            created_at: new Date().toISOString(),
+                                            message: { role: 'assistant', content: data.choices?.[0]?.delta?.content || '' },
+                                            done: Boolean(data.choices?.[0]?.finish_reason)
+                                        };
+                                    }
+
+                                    res.write(JSON.stringify(chatChunk) + '\n');
+                                } catch (e) {
+                                    console.error('Error parsing stream chunk:', e, 'Line:', line);
+                                }
+                            }
+
+                            buffer = lines[lines.length - 1];
+                        }
+                    } catch (streamError) {
+                        console.error('❌ Stream processing error:', streamError);
+                        if (!res.headersSent) {
+                            res.status(500).json({ error: 'Stream processing failed' });
+                        } else {
+                            res.end();
+                        }
+                    }
+                };
+
+                await processStream();
+            } else {
+                // Handle non-streaming response
+                const data = await llmResult.response.json();
+                console.log(`✅ ${llmResult.source} response:`, data);
+
+                let chatResponse;
+                if (llmResult.source === 'ollama') {
+                    // Ollama chat format
+                    chatResponse = {
+                        model: data.model,
+                        created_at: data.created_at,
+                        message: {
+                            role: 'assistant',
+                            content: data.message?.content || ''
+                        },
+                        done: true
+                    };
+                } else {
+                    // Secondary LLM format (OpenAI-compatible)
+                    chatResponse = {
+                        model: llmResult.model,
+                        created_at: new Date().toISOString(),
+                        message: {
+                            role: 'assistant',
+                            content: data.choices?.[0]?.message?.content || ''
+                        },
+                        done: true
+                    };
+                }
+
+                res.json(chatResponse);
+            }
+        } else {
+            // Fallback response
+            if (stream) {
+                res.setHeader('Content-Type', 'application/json');
+                res.setHeader('Cache-Control', 'no-cache');
+                res.setHeader('Connection', 'keep-alive');
+
+                const fallbackChunk = {
+                    model: llmResult.model,
+                    created_at: new Date().toISOString(),
+                    message: { role: 'assistant', content: llmResult.fallbackMessage },
+                    done: true
+                };
+                res.write(JSON.stringify(fallbackChunk) + '\n');
+                res.end();
+            } else {
+                const chatResponse = {
+                    model: llmResult.model,
+                    created_at: new Date().toISOString(),
+                    message: {
+                        role: 'assistant',
+                        content: llmResult.fallbackMessage
+                    },
+                    done: true
+                };
+                res.json(chatResponse);
+            }
+        }
+
+    } catch (error) {
+        console.error('❌ Chat LLM error:', error);
+
+        if (!res.headersSent) {
+            res.status(500).json({
+                error: 'Chat service unavailable',
+                details: error.message,
+                timestamp: new Date().toISOString()
+            });
+        }
+    }
+});
+
+// Chat API endpoints
+
+// Chat API endpoints
+app.post('/api/chat/send', async (req, res) => {
+    try {
+        const { messages, message } = req.body;
+
+        if (!message || typeof message !== 'string') {
+            return res.status(400).json({ error: 'Message is required' });
+        }
+
+        // Get context from knowledge base
+        const context = await knowledgeService.retrieveContext(message);
+        console.log('Found context items:', context.length);
+
+        // Prepare enhanced prompt
+        let enhancedPrompt = message;
+        if (context.length > 0) {
+            enhancedPrompt = `Use the following information from Tallman Equipment's knowledge base to answer the question:
+
+${context.map(item => `- ${item}`).join('\n')}
+
+Question: ${message}
+
+Answer as a knowledgeable Tallman employee:`;
+        }
+
+        // Use LLM with fallback
+        const llmResult = await callLLMWithFallback(enhancedPrompt, { stream: false });
+
+        let aiResponse;
+        if (llmResult.success) {
+            if (llmResult.source === 'ollama') {
+                // Ollama response format
+                const data = await llmResult.response.json();
+                aiResponse = data.response;
+            } else {
+                // Secondary LLM response format (OpenAI-compatible)
+                const data = await llmResult.response.json();
+                aiResponse = data.choices?.[0]?.message?.content || 'No response from secondary LLM';
+            }
+        } else {
+            // Fallback response
+            aiResponse = llmResult.fallbackMessage;
+        }
+
+        // Return the AI response
+        res.json({
+            response: aiResponse,
+            context: context.length > 0 ? context.slice(0, 3) : null,
+            llmSource: llmResult.source,
+            model: llmResult.model
+        });
+
+    } catch (error) {
+        console.error('Chat API error:', error);
+        res.status(500).json({
+            error: 'Failed to process chat message',
+            details: 'Both LLM services are unavailable'
+        });
+    }
+});
+
+// Streaming chat endpoint
+app.post('/api/chat/stream', async (req, res) => {
+    try {
+        const { message, history } = req.body;
+
+        // Get context
+        const context = await knowledgeService.retrieveContext(message);
+
+        // Build enhanced prompt
+        let enhancedPrompt = message;
+        if (context.length > 0) {
+            enhancedPrompt = `Context from Tallman knowledge base:
+${context.map(item => `- ${item}`).join('\n')}
+
+Question: ${message}
+
+Answer helpfully as a Tallman Equipment employee:`;
+        }
+
+        // Use LLM with fallback (streaming not supported for secondary LLM yet)
+        const llmResult = await callLLMWithFallback(enhancedPrompt, { stream: false });
+
+        let aiResponse;
+        if (llmResult.success) {
+            if (llmResult.source === 'ollama') {
+                // Ollama response format
+                const data = await llmResult.response.json();
+                aiResponse = data.response;
+            } else {
+                // Secondary LLM response format (OpenAI-compatible)
+                const data = await llmResult.response.json();
+                aiResponse = data.choices?.[0]?.message?.content || 'No response from secondary LLM';
+            }
+        } else {
+            // Fallback response
+            aiResponse = llmResult.fallbackMessage;
+        }
+
+        // For streaming, we'll just return the complete response as a single chunk
+        // (true streaming would require more complex implementation for secondary LLM)
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+
+        // Send the response as streaming data
+        res.write(`data: ${JSON.stringify({
+            response: aiResponse,
+            done: true,
+            llmSource: llmResult.source,
+            model: llmResult.model
+        })}\n\n`);
+        res.write('data: [DONE]\n\n');
+        res.end();
+
+    } catch (error) {
+        console.error('Streaming chat error:', error);
+        res.status(500).json({
+            error: 'Failed to start chat stream',
+            details: 'Both LLM services are unavailable'
+        });
+    }
+});
+
+// Knowledge base endpoints
+app.get('/api/knowledge', async (req, res) => {
+    try {
+        const knowledge = await knowledgeService.getAllKnowledge();
+        res.json(knowledge);
+    } catch (error) {
+        console.error('Knowledge retrieval error:', error);
+        res.status(500).json({ error: 'Failed to retrieve knowledge' });
+    }
+});
+
+app.post('/api/knowledge', async (req, res) => {
+    try {
+        const { content } = req.body;
+        if (!content || typeof content !== 'string') {
+            return res.status(400).json({ error: 'Content is required' });
+        }
+
+        await knowledgeService.addKnowledge(content.trim());
+        res.json({ success: true, message: 'Knowledge added' });
+    } catch (error) {
+        console.error('Knowledge addition error:', error);
+        res.status(500).json({ error: 'Failed to add knowledge' });
+    }
+});
+
+app.delete('/api/knowledge', async (req, res) => {
+    try {
+        await knowledgeService.clearAllKnowledge();
+        res.json({ success: true, message: 'Knowledge base cleared' });
+    } catch (error) {
+        console.error('Knowledge clear error:', error);
+        res.status(500).json({ error: 'Failed to clear knowledge' });
+    }
+});
+
+// User management endpoints
+app.get('/api/users', async (req, res) => {
+    try {
+        const users = await dbService.getAllApprovedUsers();
+        res.json(users);
+    } catch (error) {
+        console.error('User retrieval error:', error);
+        res.status(500).json({ error: 'Failed to retrieve users' });
+    }
+});
+
+app.post('/api/users', async (req, res) => {
+    try {
+        const { username, role } = req.body;
+        await dbService.addOrUpdateApprovedUser({ username, role: role || 'user' });
+        res.json({ success: true, message: 'User added' });
+    } catch (error) {
+        console.error('User addition error:', error);
+        res.status(500).json({ error: 'Failed to add user' });
+    }
+});
+
+app.delete('/api/users/:username', async (req, res) => {
+    try {
+        const { username } = req.params;
+        await dbService.deleteApprovedUser(username);
+        res.json({ success: true, message: 'User deleted' });
+    } catch (error) {
+        console.error('User deletion error:', error);
+        res.status(500).json({ error: 'Failed to delete user' });
+    }
+});
+
+// Health check
+app.get('/api/health', (req, res) => {
+    res.json({
+        status: 'ok',
+        service: 'Tallman Backend API',
+        port: PORT,
+        serverIP: serverIP,
+        timestamp: new Date().toISOString(),
+        services: {
+            ldap: 'available',
+            ollama: 'connected',
+            database: 'active'
+        }
+    });
+});
+
+// LLM test endpoint for admin panel
+app.post('/api/llm-test', async (req, res) => {
+    try {
+        const testPrompt = 'Hello, this is a test message. Please respond with a short confirmation that you received this message.';
+
+        console.log('🧪 Testing LLM connections...');
+
+        // Use LLM with fallback
+        const llmResult = await callLLMWithFallback(testPrompt, { stream: false, timeout: 10000 });
+
+        let output;
+        if (llmResult.success) {
+            if (llmResult.source === 'ollama') {
+                // Ollama response format
+                const data = await llmResult.response.json();
+                output = data.response || 'Test successful - received response from Ollama';
+            } else {
+                // Secondary LLM response format (OpenAI-compatible)
+                const data = await llmResult.response.json();
+                output = data.choices?.[0]?.message?.content || 'Test successful - received response from secondary LLM';
+            }
+
+            console.log(`✅ LLM test successful using ${llmResult.source}`);
+
+            res.json({
+                success: true,
+                output: output,
+                llmSource: llmResult.source,
+                model: llmResult.model,
+                testTarget: llmResult.source === 'ollama' ? OLLAMA_API_URL.split('localhost').join('127.0.0.1') : SECONDARY_LLM_BASE_URL
+            });
+        } else {
+            // Fallback response
+            console.log('⚠️ LLM test failed, using fallback response');
+
+            res.json({
+                success: false,
+                output: llmResult.fallbackMessage,
+                llmSource: llmResult.source,
+                model: llmResult.model,
+                testTarget: 'Both primary and secondary LLM endpoints failed'
+            });
+        }
+
+    } catch (error) {
+        console.error('❌ LLM test error:', error);
+        res.json({
+            success: false,
+            error: error.message || 'Both LLM services are unavailable',
+            testTarget: 'Both primary and secondary LLM endpoints'
+        });
+    }
+});
+
+// Status endpoint
+app.get('/api/status', (req, res) => {
+    res.json({
+        status: 'active',
+        service: 'Tallman Backend API Service',
+        port: PORT,
+        serverIP: serverIP,
+        timestamp: new Date().toISOString(),
+        hostname: require('os').hostname(),
+        ipAddresses: addresses
+    });
+});
+
+// Error handling
+app.use((error, req, res, next) => {
+    console.error('Backend API error:', error);
+    res.status(500).json({
+        error: 'Internal server error',
+        details: error.message,
+        service: 'backend-api'
+    });
+});
+
+// Graceful shutdown
+const gracefulShutdown = (signal) => {
+    console.log(`📴 Backend API - Received ${signal}. Shutting down...`);
+    process.exit(0);
+};
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+// Start server - bind to all interfaces (0.0.0.0) to be reachable from other servers
+const server = app.listen(PORT, '0.0.0.0', async (err) => {
+    if (err) {
+        console.error(`❌ Backend API failed to bind to ${serverIP}:${PORT}:`, err.message);
+        process.exit(1);
+    }
+
+    console.log('🔵 ========================================');
+    console.log('🔵 TALLMAN BACKEND API SERVER IS RUNNING!');
+    console.log('🔵 ========================================');
+    console.log();
+    console.log(`🔗 Bound to: ${serverIP}:${PORT}`);
+    console.log(`🏠 Internal API: http://${serverIP}:${PORT}/api`);
+    console.log();
+    console.log('📊 Endpoints:');
+    console.log('   POST /api/auth/login     - User authentication');
+    console.log('   POST /api/chat/send      - Chat messages');
+    console.log('   POST /api/chat/stream    - Streaming chat');
+    console.log('   GET  /api/knowledge      - Get knowledge base');
+    console.log('   POST /api/knowledge      - Add knowledge');
+    console.log('   DELETE /api/knowledge    - Clear knowledge');
+    console.log('   GET  /api/users          - Get users');
+    console.log('   POST /api/users          - Add user');
+    console.log('   DELETE /api/users/:user  - Delete user');
+    console.log();
+    console.log('🚀 Loading services...');
+
+    await loadServices();
+
+    console.log();
+    console.log('🛑 Press Ctrl+C to stop');
+    console.log('🔵 ========================================');
+});
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (err) => {
+    console.error('💥 Backend API uncaught exception:', err);
+    process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('💫 Backend API unhandled rejection:', reason);
+    process.exit(1);
+});
+
+module.exports = app;

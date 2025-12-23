@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <system.webServer>
+        <proxy enabled="true" />
+        <rewrite>
+            <rules>
+                <rule name="ReverseProxy" stopProcessing="true">
+                    <match url="(.*)" />
+                    <conditions logicalGrouping="MatchAll" trackAllCaptures="false">
+                        <add input="{HTTPS}" pattern="off" />
+                    </conditions>
+                    <action type="Rewrite" url="http://localhost:3005/{R:1}" />
+                </rule>
+                <rule name="ReverseProxySSL" stopProcessing="true">
+                    <match url="(.*)" />
+                    <conditions logicalGrouping="MatchAll" trackAllCaptures="false">
+                        <add input="{HTTPS}" pattern="on" />
+                    </conditions>
+                    <action type="Rewrite" url="http://localhost:3005/{R:1}" />
+                </rule>
+                <rule name="HTTPS Redirect" enabled="true" stopProcessing="true">
+                    <match url="(.*)" />
+                    <conditions logicalGrouping="MatchAll" trackAllCaptures="false">
+                        <add input="{HTTPS}" pattern="off" />
+                        <add input="{HTTP_HOST}" pattern="^chat\.tallman\.com(.*)$" />
+                    </conditions>
+                    <action type="Redirect" url="https://chat.tallman.com{R:1}" redirectType="Permanent" />
+                </rule>
+            </rules>
+        </rewrite>
+        <defaultDocument>
+            <files>
+                <clear />
+                <add value="index.html" />
+            </files>
+        </defaultDocument>
+        <security>
+            <requestFiltering allowDoubleEscaping="true" />
+        </security>
+    </system.webServer>
+</configuration>

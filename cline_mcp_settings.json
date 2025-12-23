@@ -1,0 +1,21 @@
+{
+  "mcpServers": {
+    "browser-use": {
+      "command": "uvx",
+      "args": ["mcp-server-browser-use@latest"],
+      "env": {
+        "MCP_LLM_PROVIDER": "openai",
+        "MCP_LLM_MODEL_NAME": "gpt-4o-mini",
+        "MCP_BROWSER_HEADLESS": "true"
+      },
+      "disabled": false,
+      "autoApprove": []
+    },
+    "github.com/executeautomation/mcp-playwright": {
+      "command": "npx",
+      "args": ["-y", "@executeautomation/playwright-mcp-server"],
+      "disabled": false,
+      "autoApprove": []
+    }
+  }
+}

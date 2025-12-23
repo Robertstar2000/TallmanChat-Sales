@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Learning Function Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+        }
+        .success { border-color: #4CAF50; background-color: #f0f8f0; }
+        .info { border-color: #2196F3; background-color: #f0f4f8; }
+        .warning { border-color: #FF9800; background-color: #fff8f0; }
+        .step { margin: 10px 0; padding: 10px; background: #f5f5f5; border-radius: 4px; }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover { background: #0056b3; }
+        .status { margin: 10px 0; padding: 10px; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <h1>🧠 Learning Function Test Guide</h1>
+
+    <div class="test-section info">
+        <h2>📋 Test Overview</h2>
+        <p>The learning function allows you to edit AI responses and save improved versions to the knowledge base. Future queries will prioritize these improved answers.</p>
+    </div>
+
+    <div class="test-section warning">
+        <h2>⚠️ Prerequisites</h2>
+        <div class="step">
+            <strong>1.</strong> Make sure the development server is running:
+            <div><code>http://localhost:5174</code></div>
+        </div>
+        <div class="step">
+            <strong>2.</strong> Open the application in your browser and log in
+        </div>
+    </div>
+
+    <div class="test-section success">
+        <h2>🧪 Manual Test Steps</h2>
+
+        <div class="step">
+            <strong>Step 1:</strong> Ask a question
+            <p>Type a question in the chat, like: <em>"What is Tallman Equipment's phone number?"</em></p>
+        </div>
+
+        <div class="step">
+            <strong>Step 2:</strong> Wait for AI response
+            <p>The AI should provide an answer based on the knowledge base.</p>
+        </div>
+
+        <div class="step">
+            <strong>Step 3:</strong> Edit the response
+            <p>Click the <span style="color: #666;">✏️ pencil icon</span> next to the AI response to edit it.</p>
+        </div>
+
+        <div class="step">
+            <strong>Step 4:</strong> Improve the answer
+            <p>Modify the response to be more accurate, complete, or helpful. For example, add more details or fix any inaccuracies.</p>
+        </div>
+
+        <div class="step">
+            <strong>Step 5:</strong> Save the improved version
+            <p>Click the <span style="color: #4CAF50;">Save button</span> to store the improved answer in the knowledge base.</p>
+        </div>
+
+        <div class="step">
+            <strong>Step 6:</strong> Test the learning
+            <p>Ask a similar question again. The improved answer should now appear first in the AI's response.</p>
+        </div>
+
+        <div class="step">
+            <strong>Step 7:</strong> Verify prioritization
+            <p>The newest (improved) answer should be prioritized over older versions when the knowledge base is queried.</p>
+        </div>
+    </div>
+
+    <div class="test-section info">
+        <h2>🔍 What to Look For</h2>
+        <ul>
+            <li><strong>Edit Icon:</strong> ✏️ pencil icon appears next to AI responses</li>
+            <li><strong>Edit Mode:</strong> Text area appears when editing</li>
+            <li><strong>Save/Cancel:</strong> Green save button and gray cancel button</li>
+            <li><strong>Knowledge Base:</strong> Improved answers are stored with current timestamp</li>
+            <li><strong>Prioritization:</strong> Newer answers appear first in search results</li>
+            <li><strong>Context Integration:</strong> Improved answers are included in future AI responses</li>
+        </ul>
+    </div>
+
+    <div class="test-section warning">
+        <h2>🚨 Troubleshooting</h2>
+        <ul>
+            <li><strong>No edit icon?</strong> Make sure you're logged in as an admin user</li>
+            <li><strong>Save not working?</strong> Check browser console for errors</li>
+            <li><strong>Old answers still appearing?</strong> This has been fixed - the system now properly updates the AI context</li>
+            <li><strong>Knowledge base empty?</strong> The app should auto-populate with default knowledge</li>
+            <li><strong>Edit reverts after save?</strong> This has been fixed - messages now stay updated</li>
+        </ul>
+    </div>
+
+    <div class="test-section">
+        <h2>🎯 Quick Test Questions</h2>
+        <p>Try these questions to test the learning function:</p>
+        <ul>
+            <li>"Where is Tallman Equipment located?"</li>
+            <li>"What are Tallman Equipment's hours?"</li>
+            <li>"What services does Tallman Equipment offer?"</li>
+            <li>"What is Tallman Equipment's phone number?"</li>
+        </ul>
+    </div>
+
+    <div class="status" id="status">
+        <p>💡 Open <a href="http://localhost:5174" target="_blank">http://localhost:5174</a> to start testing!</p>
+    </div>
+
+    <script>
+        // Simple status checker
+        fetch('http://localhost:5174')
+            .then(response => {
+                if (response.ok) {
+                    document.getElementById('status').innerHTML =
+                        '<p>✅ Development server is running! You can start testing now.</p>' +
+                        '<p><a href="http://localhost:5174" target="_blank">Open Tallman Chat</a></p>';
+                    document.getElementById('status').className = 'status success';
+                }
+            })
+            .catch(error => {
+                document.getElementById('status').innerHTML =
+                    '<p>❌ Development server not detected. Please start it first:</p>' +
+                    '<p><code>npm run dev</code></p>';
+                document.getElementById('status').className = 'status warning';
+            });
+    </script>
+</body>
+</html>

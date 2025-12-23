@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  tallman-chat:
+    build: .
+    ports:
+      - "3220:3220"  # UI server
+      - "3210:3210"  # Backend API server
+      - "12435:12435"  # Granite API bridge
+    env_file:
+      - .env.docker
+    environment:
+      - NODE_ENV=production
+      - BACKEND_SERVICE_HOST=localhost
+      - BACKEND_SERVICE_PORT=3210
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    volumes:
+      - ./logs:/app/logs
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - ollama
+    networks:
+      - tallman-network
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11435:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+    networks:
+      - tallman-network
+    restart: unless-stopped
+    # Uncomment and modify the following to pull a model on startup
+    # command: ["ollama", "serve"]
+    # And add this to pull the model:
+    # command: ["sh", "-c", "ollama serve & sleep 5 && ollama pull llama3.1:8b && wait"]
+
+  # LDAP service (if running in Docker)
+  # ldap:
+  #   build: ./ldap-server
+  #   ports:
+  #     - "3100:3100"
+  #   environment:
+  #     - LDAP_HOST=0.0.0.0
+  #     - LDAP_PORT=3100
+  #   networks:
+  #     - tallman-network
+  #   restart: unless-stopped
+
+volumes:
+  ollama-data:
+    driver: local
+
+networks:
+  tallman-network:
+    driver: bridge
