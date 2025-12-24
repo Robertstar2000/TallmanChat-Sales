@@ -11,6 +11,7 @@ const path = require('path');
 const { networkInterfaces } = require('os');
 const fetch = require('node-fetch');
 const bcrypt = require('bcryptjs');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 // Load environment variables from .env.local or .env.docker
 const envLocalPath = path.join(__dirname, '..', '.env.local');
@@ -73,8 +74,13 @@ let SECONDARY_LLM_BASE_URL = process.env.SECONDARY_LLM_BASE_URL || 'http://host.
 SECONDARY_LLM_BASE_URL = SECONDARY_LLM_BASE_URL.split('localhost').join('127.0.0.1').split('::1').join('127.0.0.1');
 const SECONDARY_LLM_MODEL = process.env.SECONDARY_LLM_MODEL || 'ai/granite-4.0-micro';
 
-console.log(`🤖 Primary LLM: Ollama model ${OLLAMA_MODEL} at ${OLLAMA_HOST}:11434`);
+// Tertiary LLM Configuration (Google Gemini)
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-pro';
+
+console.log(`🤖 Primary LLM: Gemini model ${GEMINI_MODEL}`);
 console.log(`🤖 Secondary LLM: ${SECONDARY_LLM_MODEL} at ${SECONDARY_LLM_BASE_URL}`);
+console.log(`🤖 Tertiary LLM: Ollama model ${OLLAMA_MODEL} at ${OLLAMA_HOST}:11434`);
 
 console.log(`🤖 Ollama configured at: ${OLLAMA_HOST}:11434`);
 console.log(`🔐 LDAP configured at: ${LDAP_SERVICE_HOST}:${LDAP_SERVICE_PORT}`);
@@ -83,23 +89,45 @@ console.log(`🔐 LDAP configured at: ${LDAP_SERVICE_HOST}:${LDAP_SERVICE_PORT}`
 async function callLLMWithFallback(prompt, options = {}) {
     const { stream = false, model = null, timeout = 15000 } = options; // Reduced timeout to 15 seconds
 
-    // Try Granite first (Secondary LLM)
+    // Try Gemini first (Primary LLM)
     try {
-        console.log('🔄 Trying primary LLM (Granite Docker)...');
+        console.log('🔄 Trying primary LLM (Gemini)...');
+
+        const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+        const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+
+        const result = await model.generateContent(prompt);
+        const response = result.response;
+        const text = response.text();
+
+        console.log('✅ Primary LLM (Gemini) succeeded');
+        return {
+            success: true,
+            source: 'gemini',
+            model: GEMINI_MODEL,
+            response: { text: text }
+        };
+    } catch (geminiError) {
+        console.error('❌ Gemini LLM error:', geminiError.message);
+    }
+
+    // Try LocalAI as secondary fallback
+    try {
+        console.log('🔄 Trying secondary LLM (LocalAI)...');
 
         const secondaryRequest = {
             model: model || SECONDARY_LLM_MODEL,
-            messages: [{ role: 'user', content: prompt }],
+            prompt: prompt,
             stream: stream
         };
 
         const controller = new AbortController();
         const timeoutId = setTimeout(() => {
-            console.log('⏰ Granite request timed out');
+            console.log('⏰ LocalAI request timed out');
             controller.abort();
         }, timeout);
 
-        const secondaryResponse = await fetch(SECONDARY_LLM_BASE_URL + '/chat/completions', {
+        const secondaryResponse = await fetch(SECONDARY_LLM_BASE_URL + '/completions', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(secondaryRequest),
@@ -109,24 +137,25 @@ async function callLLMWithFallback(prompt, options = {}) {
         clearTimeout(timeoutId);
 
         if (secondaryResponse.ok) {
-            console.log('✅ Primary LLM (Granite) succeeded');
+            console.log('✅ Secondary LLM (LocalAI) succeeded');
+            const data = await secondaryResponse.json();
             return {
                 success: true,
                 source: 'secondary',
                 model: model || SECONDARY_LLM_MODEL,
-                response: secondaryResponse
+                response: { text: data.choices?.[0]?.text }
             };
         }
 
-        console.error(`❌ Granite LLM failed with status ${secondaryResponse.status}`);
+        console.error(`❌ LocalAI LLM failed with status ${secondaryResponse.status}`);
 
     } catch (secondaryError) {
-        console.error('❌ Granite LLM error:', secondaryError.message);
+        console.error('❌ LocalAI LLM error:', secondaryError.message);
     }
 
-    // Try Ollama as fallback
+    // Try Ollama as tertiary fallback
     try {
-        console.log('🔄 Trying fallback LLM (Ollama)...');
+        console.log('🔄 Trying tertiary LLM (Ollama)...');
 
         const ollamaRequest = {
             model: model || OLLAMA_MODEL,
@@ -150,7 +179,7 @@ async function callLLMWithFallback(prompt, options = {}) {
         clearTimeout(timeoutId);
 
         if (ollamaResponse.ok) {
-            console.log('✅ Primary LLM (Ollama) succeeded');
+            console.log('✅ Tertiary LLM (Ollama) succeeded');
             return {
                 success: true,
                 source: 'ollama',
@@ -159,25 +188,70 @@ async function callLLMWithFallback(prompt, options = {}) {
             };
         }
 
-        console.log(`⚠️ Primary LLM failed with status ${ollamaResponse.status}, trying secondary LLM...`);
+        console.error(`❌ Ollama LLM failed with status ${ollamaResponse.status}`);
 
     } catch (ollamaError) {
-        console.log('⚠️ Primary LLM error:', ollamaError.message, '- trying secondary LLM...');
+        console.error('❌ Ollama LLM error:', ollamaError.message);
     }
 
-    // Fallback to secondary LLM
+    // All failed - provide fallback response instead of throwing
+    console.error('💥 All LLM services failed, providing fallback response');
+    return {
+        success: false,
+        source: 'fallback',
+        model: 'none',
+        response: null,
+        fallbackMessage: 'I apologize, but all AI services are currently unavailable. Please try again later.'
+    };
+}
+
+// Chat LLM Fallback Helper Function (for chat API with messages array)
+async function callChatLLMWithFallback(messages, options = {}) {
+    const { stream = false, model = null, timeout = 15000 } = options; // Reduced timeout
+
+    // Try Gemini chat API first
     try {
-        console.log('🔄 Trying secondary LLM (Granite Docker)...');
+        console.log('🔄 Trying primary LLM (Gemini chat API)...');
+
+        const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+        const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+
+        const chat = model.startChat({
+            history: messages.slice(0, -1).map(msg => ({
+                role: msg.role === 'assistant' ? 'model' : 'user',
+                parts: [{ text: msg.content }]
+            }))
+        });
+
+        const lastMessage = messages[messages.length - 1];
+        const result = await chat.sendMessage(lastMessage.content);
+        const response = result.response;
+        const text = response.text();
+
+        console.log('✅ Primary LLM (Gemini chat) succeeded');
+        return {
+            success: true,
+            source: 'gemini',
+            model: GEMINI_MODEL,
+            response: { text: text }
+        };
+    } catch (geminiError) {
+        console.log('❌ Gemini LLM error:', geminiError.message);
+    }
+
+    // Fallback to LocalAI (OpenAI-compatible)
+    try {
+        console.log('🔄 Trying secondary LLM (LocalAI chat)...');
 
         const secondaryRequest = {
             model: model || SECONDARY_LLM_MODEL,
-            messages: [{ role: 'user', content: prompt }],
+            messages: messages,
             stream: stream
         };
 
         const controller = new AbortController();
         const timeoutId = setTimeout(() => {
-            console.log('⏰ Secondary LLM request timed out');
+            console.log('⏰ LocalAI chat request timed out');
             controller.abort();
         }, timeout);
 
@@ -191,7 +265,7 @@ async function callLLMWithFallback(prompt, options = {}) {
         clearTimeout(timeoutId);
 
         if (secondaryResponse.ok) {
-            console.log('✅ Secondary LLM (Granite) succeeded');
+            console.log('✅ Secondary LLM (LocalAI chat) succeeded');
             return {
                 success: true,
                 source: 'secondary',
@@ -200,30 +274,15 @@ async function callLLMWithFallback(prompt, options = {}) {
             };
         }
 
-        console.error(`❌ Secondary LLM failed with status ${secondaryResponse.status}`);
+        console.error(`❌ LocalAI failed with status ${secondaryResponse.status}`);
 
     } catch (secondaryError) {
-        console.error('❌ Secondary LLM error:', secondaryError.message);
+        console.error('❌ LocalAI error:', secondaryError.message);
     }
 
-    // Both failed - provide fallback response instead of throwing
-    console.error('💥 Both LLM services failed, providing fallback response');
-    return {
-        success: false,
-        source: 'fallback',
-        model: 'none',
-        response: null,
-        fallbackMessage: 'I apologize, but both AI services are currently unavailable. Please try again later.'
-    };
-}
-
-// Chat LLM Fallback Helper Function (for chat API with messages array)
-async function callChatLLMWithFallback(messages, options = {}) {
-    const { stream = false, model = null, timeout = 15000 } = options; // Reduced timeout
-
-    // Try Ollama chat API first
+    // Try Ollama as tertiary fallback
     try {
-        console.log('🔄 Trying primary LLM (Ollama chat API)...');
+        console.log('🔄 Trying tertiary LLM (Ollama chat)...');
 
         const ollamaRequest = {
             model: model || OLLAMA_MODEL,
@@ -247,7 +306,7 @@ async function callChatLLMWithFallback(messages, options = {}) {
         clearTimeout(timeoutId);
 
         if (ollamaResponse.ok) {
-            console.log('✅ Primary LLM (Ollama chat) succeeded');
+            console.log('✅ Tertiary LLM (Ollama chat) succeeded');
             return {
                 success: true,
                 source: 'ollama',
@@ -256,61 +315,20 @@ async function callChatLLMWithFallback(messages, options = {}) {
             };
         }
 
-        console.log(`⚠️ Primary LLM chat failed with status ${ollamaResponse.status}, trying secondary LLM...`);
+        console.error(`❌ Ollama failed with status ${ollamaResponse.status}`);
 
     } catch (ollamaError) {
-        console.log('⚠️ Primary LLM chat error:', ollamaError.message, '- trying secondary LLM...');
+        console.error('❌ Ollama error:', ollamaError.message);
     }
 
-    // Fallback to secondary LLM (OpenAI-compatible)
-    try {
-        console.log('🔄 Trying secondary LLM (Granite Docker chat)...');
-
-        const secondaryRequest = {
-            model: model || SECONDARY_LLM_MODEL,
-            messages: messages,
-            stream: stream
-        };
-
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => {
-            console.log('⏰ Secondary LLM chat request timed out');
-            controller.abort();
-        }, timeout);
-
-        const secondaryResponse = await fetch(SECONDARY_LLM_BASE_URL + '/chat/completions', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(secondaryRequest),
-            signal: controller.signal
-        });
-
-        clearTimeout(timeoutId);
-
-        if (secondaryResponse.ok) {
-            console.log('✅ Secondary LLM (Granite chat) succeeded');
-            return {
-                success: true,
-                source: 'secondary',
-                model: model || SECONDARY_LLM_MODEL,
-                response: secondaryResponse
-            };
-        }
-
-        console.error(`❌ Secondary LLM failed with status ${secondaryResponse.status}`);
-
-    } catch (secondaryError) {
-        console.error('❌ Secondary LLM error:', secondaryError.message);
-    }
-
-    // Both failed - provide fallback response instead of throwing
-    console.error('💥 Both LLM services failed, providing fallback response');
+    // All failed - provide fallback response instead of throwing
+    console.error('💥 All LLM services failed, providing fallback response');
     return {
         success: false,
         source: 'fallback',
         model: 'none',
         response: null,
-        fallbackMessage: 'I apologize, but both AI services are currently unavailable. Please try again later.'
+        fallbackMessage: 'I apologize, but all AI services are currently unavailable. Please try again later.'
     };
 }
 
@@ -1008,13 +1026,12 @@ app.post('/api/llm-test', async (req, res) => {
 
         let output;
         if (llmResult.success) {
-            if (llmResult.source === 'ollama') {
-                // Ollama response format
-                const data = await llmResult.response.json();
-                output = data.response || 'Test successful - received response from Ollama';
+            const data = await llmResult.response.json();
+            if (llmResult.source === 'gemini') {
+                output = data.text || 'Test successful - received response from Gemini';
+            } else if (llmResult.source === 'ollama' || llmResult.source === 'secondary') {
+                output = data.response || `Test successful - received response from ${llmResult.source}`;
             } else {
-                // Secondary LLM response format (OpenAI-compatible)
-                const data = await llmResult.response.json();
                 output = data.choices?.[0]?.message?.content || 'Test successful - received response from secondary LLM';
             }
 
@@ -1036,7 +1053,7 @@ app.post('/api/llm-test', async (req, res) => {
                 output: llmResult.fallbackMessage,
                 llmSource: llmResult.source,
                 model: llmResult.model,
-                testTarget: 'Both primary and secondary LLM endpoints failed'
+                testTarget: 'All LLM endpoints failed'
             });
         }
 
