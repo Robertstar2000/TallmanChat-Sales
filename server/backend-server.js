@@ -117,7 +117,7 @@ async function callLLMWithFallback(prompt, options = {}) {
 
         const secondaryRequest = {
             model: model || SECONDARY_LLM_MODEL,
-            prompt: prompt,
+            messages: [{ role: 'user', content: prompt }],
             stream: stream
         };
 
@@ -127,7 +127,7 @@ async function callLLMWithFallback(prompt, options = {}) {
             controller.abort();
         }, timeout);
 
-        const secondaryResponse = await fetch(SECONDARY_LLM_BASE_URL + '/completions', {
+        const secondaryResponse = await fetch(SECONDARY_LLM_BASE_URL + '/chat/completions', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(secondaryRequest),
@@ -143,7 +143,7 @@ async function callLLMWithFallback(prompt, options = {}) {
                 success: true,
                 source: 'secondary',
                 model: model || SECONDARY_LLM_MODEL,
-                response: { text: data.choices?.[0]?.text }
+                response: { text: data.choices?.[0]?.message?.content }
             };
         }
 
@@ -153,7 +153,8 @@ async function callLLMWithFallback(prompt, options = {}) {
         console.error('❌ LocalAI LLM error:', secondaryError.message);
     }
 
-    // Try Ollama as tertiary fallback
+    // Try Ollama as tertiary fallback (commented out)
+    /*
     try {
         console.log('🔄 Trying tertiary LLM (Ollama)...');
 
@@ -193,6 +194,7 @@ async function callLLMWithFallback(prompt, options = {}) {
     } catch (ollamaError) {
         console.error('❌ Ollama LLM error:', ollamaError.message);
     }
+    */
 
     // All failed - provide fallback response instead of throwing
     console.error('💥 All LLM services failed, providing fallback response');
@@ -280,7 +282,8 @@ async function callChatLLMWithFallback(messages, options = {}) {
         console.error('❌ LocalAI error:', secondaryError.message);
     }
 
-    // Try Ollama as tertiary fallback
+    // Try Ollama as tertiary fallback (commented out)
+    /*
     try {
         console.log('🔄 Trying tertiary LLM (Ollama chat)...');
 
@@ -320,6 +323,7 @@ async function callChatLLMWithFallback(messages, options = {}) {
     } catch (ollamaError) {
         console.error('❌ Ollama error:', ollamaError.message);
     }
+    */
 
     // All failed - provide fallback response instead of throwing
     console.error('💥 All LLM services failed, providing fallback response');
@@ -840,9 +844,8 @@ Answer as a knowledgeable Tallman employee:`;
                 const data = await llmResult.response.json();
                 aiResponse = data.response;
             } else {
-                // Secondary LLM response format (OpenAI-compatible)
-                const data = await llmResult.response.json();
-                aiResponse = data.choices?.[0]?.message?.content || 'No response from secondary LLM';
+                // Secondary/Gemini response format
+                aiResponse = llmResult.response.text || 'No response from LLM';
             }
         } else {
             // Fallback response
@@ -895,9 +898,8 @@ Answer helpfully as a Tallman Equipment employee:`;
                 const data = await llmResult.response.json();
                 aiResponse = data.response;
             } else {
-                // Secondary LLM response format (OpenAI-compatible)
-                const data = await llmResult.response.json();
-                aiResponse = data.choices?.[0]?.message?.content || 'No response from secondary LLM';
+                // Secondary/Gemini response format
+                aiResponse = llmResult.response.text || 'No response from LLM';
             }
         } else {
             // Fallback response
@@ -1026,13 +1028,10 @@ app.post('/api/llm-test', async (req, res) => {
 
         let output;
         if (llmResult.success) {
-            const data = await llmResult.response.json();
             if (llmResult.source === 'gemini') {
-                output = data.text || 'Test successful - received response from Gemini';
-            } else if (llmResult.source === 'ollama' || llmResult.source === 'secondary') {
-                output = data.response || `Test successful - received response from ${llmResult.source}`;
+                output = llmResult.response.text || 'Test successful - received response from Gemini';
             } else {
-                output = data.choices?.[0]?.message?.content || 'Test successful - received response from secondary LLM';
+                output = llmResult.response.text || `Test successful - received response from ${llmResult.source}`;
             }
 
             console.log(`✅ LLM test successful using ${llmResult.source}`);

@@ -7,18 +7,23 @@ This guide covers the production deployment architecture, code update procedures
 ## 🏗️ **Current Production Architecture**
 
 ### **System Components**
-- **Frontend**: IIS 10.0 serving React SPA from `C:\inetpub\TallmanChatProd\`
-- **Backend**: Windows service `TallmanChatBackend` (Node.js) on port 3215
-- **Database**: SQLite embedded database
-- **AI Model**: Ollama llama3.3:latest (39.6GB) on **external server at `http://10.10.20.24:11434`**
-- **Authentication**: LDAP/Active Directory on `127.0.0.1:3100`
-- **Reverse Proxy**: IIS ARR routes `/api/*` to backend service
+- **Containerization**: Docker Compose multi-service setup
+- **Frontend**: React SPA served by Node.js (port 3230)
+- **Backend**: Express.js API server (port 3231)
+- **AI Models**:
+  - **Primary**: Google Gemini 2.0 Flash (experimental) - Cloud API
+  - **Secondary**: Docker Granite 4.0 Nano - Local container model
+  - **Fallback**: Automatic switching between models
+- **Database**: In-memory storage with persistent knowledge base
+- **Authentication**: LDAP/Active Directory (`host.docker.internal:3100`)
+- **API Bridge**: Granite API bridge on port 12435
 
 ### **URLs & Access**
-- **Production UI**: `http://localhost` (port 80) or `http://chat.tallman.com`
-- **Backend API**: `http://localhost:3215` (internal only)
+- **Production UI**: `http://localhost:3230`
+- **Backend API**: `http://localhost:3231/api`
+- **Granite API Bridge**: `http://localhost:12435/v1/chat/completions`
 - **Admin Panel**: Via UI login → "Admin" role access
-- **Health Check**: Both IIS and backend have `/api/health` endpoints
+- **Health Check**: `/api/health` endpoint
 
 ---
 
@@ -48,7 +53,7 @@ This guide covers the production deployment architecture, code update procedures
 
 ```bash
 # Navigate to application directory
-cd C:\Path\To\Tallman-Chat
+cd c:\Users\rober\TallmanChat\TallmanChat-Sales
 
 # Create backup branch (optional)
 git branch backup-$(date +%Y%m%d-%H%M%S)
@@ -82,53 +87,33 @@ ls -la dist/
 
 ### **Step 4: Zero-Downtime Redeployment**
 
-#### **Option A: Service Restart (Minimal Downtime)**
+#### **Docker Container Update**
 
-```batch
-REM Stop services briefly
-net stop TallmanChatService
-timeout /t 5 /nobreak
+```bash
+# Stop current containers
+docker-compose down
 
-REM Restart services
-net start TallmanChatService
-net start TallmanLDAPAuth
-```
+# Rebuild and start containers
+docker-compose up --build -d
 
-#### **Option B: Rolling Update (No Downtime)**
-
-If you have multiple server availability:
-
-```batch
-REM 1. Stop service on Server A
-net stop TallmanChatService
-
-REM 2. Deploy code to Server A
-REM Copy dist/, services/, server/ directories
-
-REM 3. Start service on Server A
-net start TallmanChatService
-
-REM 4. Test Server A functionality
-curl http://serverA:3005/api/health
-
-REM 5. Repeat for Server B, then C, etc.
+# Verify containers are running
+docker ps
 ```
 
 ### **Step 5: Verify Deployment**
 
 ```bash
-# Test application health
-curl http://10.10.20.9:3005/api/health
+# Test UI access
+curl http://localhost:3230
 
-# Test LDAP authentication
-curl http://10.10.20.9:3890/health
+# Test backend API
+curl http://localhost:3231/api/health
 
-# Check services are running
-sc query TallmanChatService
-sc query TallmanLDAPAuth
+# Test LLM functionality
+curl -X POST http://localhost:3231/api/llm-test
 
-# Monitor logs
-nssm view TallmanChatService AppStdout
+# Check container logs
+docker logs tallmanchat-sales-tallman-chat-1
 ```
 
 ### **Step 6: Rollback Plan**
@@ -507,10 +492,20 @@ const dbConfig = {
 
 ### **Common Issues**
 
-**Services not starting:**
-- Check NSSM installation
-- Verify file paths
-- Check Windows Event Viewer
+**Container not starting:**
+- Check Docker Desktop is running
+- Verify Docker socket permissions
+- Check `docker-compose logs`
+
+**Gemini API failing:**
+- Verify API key is valid in `.env.docker`
+- Check internet connectivity
+- Test API key manually
+
+**Granite model failing:**
+- Check Docker AI models: `docker model ls`
+- Verify Granite model is installed
+- Check container logs for Docker command errors
 
 **LDAP authentication failing:**
 - Test LDAP connectivity
@@ -518,39 +513,48 @@ const dbConfig = {
 - Check domain membership
 
 **Chat not working:**
-- Verify Ollama is running
-- Check model is downloaded
-- Test API endpoints
+- Test LLM endpoints: `curl -X POST http://localhost:3231/api/llm-test`
+- Check API logs for errors
+- Verify model fallback is working
 
 **Performance issues:**
-- Monitor resource usage
-- Check database connections
+- Monitor container resource usage
+- Check Docker resource limits
 - Review application logs
 
 ### **Getting Help**
 
 1. **Check logs first:**
    ```bash
-   nssm view TallmanChatService AppStdout
-   nssm view TallmanChatService AppStderr
+   # Container logs
+   docker logs tallmanchat-sales-tallman-chat-1
+
+   # Docker Compose logs
+   docker-compose logs
    ```
 
 2. **Test individual components:**
    ```bash
-   # Test Ollama
-   curl http://10.10.20.24:11434/api/tags
-
-   # Test LDAP
-   node server/ldap-auth.js
+   # Test UI
+   curl http://localhost:3230
 
    # Test API
-   curl http://10.10.20.9:3005/api/health
+   curl http://localhost:3231/api/health
+
+   # Test LLM
+   curl -X POST http://localhost:3231/api/llm-test
+
+   # Test Granite API
+   curl http://localhost:12435/v1/chat/completions -X POST -H "Content-Type: application/json" -d '{"messages":[{"role":"user","content":"test"}]}'
+
+   # Test LDAP
+   curl http://host.docker.internal:3100/health
    ```
 
 3. **Configuration verification:**
-   - Check `server/ldap-auth.js` LDAP settings
-   - Verify `services/ollamaService.ts` Ollama config
-   - Confirm firewall rules are active
+   - Check `.env.docker` for correct API keys and settings
+   - Verify `docker-compose.yml` port mappings
+   - Confirm Docker networks are properly configured
 
 ---
 

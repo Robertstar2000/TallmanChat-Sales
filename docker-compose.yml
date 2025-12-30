@@ -16,6 +16,7 @@ services:
     volumes:
       - ./logs:/app/logs
       - /var/run/docker.sock:/var/run/docker.sock
+      - "/c/Program Files/Docker/Docker/resources/bin/docker:/usr/local/bin/docker-host:ro"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:

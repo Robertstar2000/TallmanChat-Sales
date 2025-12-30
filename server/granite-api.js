@@ -31,7 +31,7 @@ app.post('/v1/chat/completions', async (req, res) => {
 
         const prompt = lastMessage.content;
 
-        // Run the granite model
+        // Run the granite model using host docker
         const result = await runGraniteModel(prompt);
 
         const response = {
@@ -69,8 +69,8 @@ app.post('/v1/chat/completions', async (req, res) => {
 
 async function runGraniteModel(prompt) {
     return new Promise((resolve, reject) => {
-        // Prepare the docker command
-        const dockerProcess = spawn('docker', ['model', 'run', GRANITE_MODEL], {
+        // Prepare the docker command using host docker binary
+        const dockerProcess = spawn('/usr/local/bin/docker-host', ['model', 'run', GRANITE_MODEL], {
             stdio: ['pipe', 'pipe', 'pipe']
         });
 

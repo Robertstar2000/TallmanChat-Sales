@@ -41,6 +41,8 @@ COPY server/ ./server/
 COPY .env.local ./.env.local
 COPY .env.docker ./.env.docker
 
+# Mount host docker binary for model commands
+
 # Expose ports
 EXPOSE 3210 3220
 

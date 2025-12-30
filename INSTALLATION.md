@@ -2,15 +2,19 @@
 
 ## 📋 **Overview**
 
-This guide provides complete installation instructions for deploying Tallman Chat in a production IIS environment.
+This guide provides complete installation instructions for deploying Tallman Chat using Docker containers.
 
 ### **🏗️ Architecture Overview**
 ```
-IIS Reverse Proxy (Port 80)
-    ↓ (Proxy to localhost:3003)
-Node.js Production Server (Port 3003)
-    ↙ API Calls → Ollama Service (Port 11434)
-    ↘ UI Assets → React Application
+Docker Compose Multi-Service Setup
+├── tallman-chat (Main Container)
+│   ├── Frontend: React SPA (Port 3230)
+│   ├── Backend: Express.js API (Port 3231)
+│   └── Granite API Bridge (Port 12435)
+├── AI Models:
+│   ├── Primary: Google Gemini 2.0 Flash (Cloud API)
+│   └── Secondary: Docker Granite 4.0 Nano (Local)
+└── Authentication: LDAP/Active Directory
 ```
 
 ---
@@ -25,28 +29,28 @@ Node.js Production Server (Port 3003)
 ### **Port Mapping**
 | Service | Port | Internal/External | Purpose |
 |---------|------|------------------|---------|
-| IIS | 80 | External | Web access |
-| TallmanChatService | 3003 | Internal | Node.js server |
-| TallmanBackendService | 3006 | Internal | Database operations |
-| TallmanLDAPAuthService | 3890 | External | LDAP authentication |
-| Ollama | 11434 | Internal | AI model service |
+| UI (React) | 3230 | External | Web interface |
+| API (Express) | 3231 | Internal | Backend API |
+| Granite Bridge | 12435 | Internal | AI model bridge |
+| LDAP | 3100 | Internal | Authentication |
 
 ---
 
 ## 🔧 **Required Software Installation**
 
 ### **Prerequisites**
-- **Windows Server 2019+**
-- **IIS 10.0+** with Application Request Routing
-- **Node.js 18.0+**
-- **NSSM (Non-Sucking Service Manager)**
-- **Git**
+- **Windows 10/11 or Windows Server 2019+**
+- **Docker Desktop** with WSL2 integration
+- **Git** for version control
+- **Google Gemini API key** (for primary AI model)
 
 ### **AI Service Setup**
 ```bash
-# Install Ollama on 10.10.20.24
-ollama pull llama3.2:latest
-ollama serve  # Should start on port 11434
+# Install Docker AI models (if not already available)
+docker model pull ai/granite-4.0-nano:latest
+
+# Verify models
+docker model ls
 ```
 
 ---
@@ -55,64 +59,50 @@ ollama serve  # Should start on port 11434
 
 ### **Step 1: Clone Repository**
 ```bash
-cd C:\inetpub
-git clone https://github.com/Robertstar2000/Tallman-Chat.git TallmanChat
-cd TallmanChat
+cd c:\Users\rober\TallmanChat
+git clone https://github.com/Robertstar2000/Chat-Tallman.git TallmanChat-Sales
+cd TallmanChat-Sales
 ```
 
-### **Step 2: Install Dependencies**
+### **Step 2: Configure Environment**
 ```bash
-npm install
+# Copy and edit environment configuration
+cp .env.docker .env.docker.local
+
+# Edit .env.docker.local with your settings:
+# - Google Gemini API key
+# - LDAP server details (if using authentication)
 ```
 
-### **Step 3: Configure IIS Reverse Proxy**
-```powershell
-# Run as Administrator
-.\setup-iis-reverse-proxy.ps1
-```
-
-**IIS Site Configuration:**
-- **Site Name**: TallmanChat
-- **Physical Path**: `C:\inetpub\TallmanChat`
-- **Binding**: Port 80, Host Header: chat.tallman.com
-- **Application Pool**: TallmanChatPool
-
-### **Step 4: Configure web.config**
-The `web.config` in `C:\inetpub\TallmanChat` should contain:
-```xml
-<configuration>
-  <system.webServer>
-    <proxy enabled="true" />
-    <rewrite>
-      <rules>
-        <rule name="ReverseProxy" stopProcessing="true">
-          <match url="(.*)" />
-          <conditions logicalGrouping="MatchAll" trackAllCaptures="false">
-            <add input="{HTTPS}" pattern="off" />
-          </conditions>
-          <action type="Rewrite" url="http://localhost:3003/{R:1}" />
-        </rule>
-      </rules>
-    </rewrite>
-  </system.webServer>
-</configuration>
-```
-
-### **Step 5: Build Production Application**
+### **Step 3: Install AI Models**
 ```bash
-npm run build
+# Ensure Docker AI models are available
+docker model ls
+
+# If Granite model not available:
+docker model pull ai/granite-4.0-nano:latest
 ```
 
-### **Step 6: Install Windows Services**
-```cmd
-REM Run as Administrator
-install-service.bat
+### **Step 4: Start Docker Services**
+```bash
+# Start all services
+docker-compose up -d
+
+# Verify containers are running
+docker ps
 ```
 
-**Installed Services:**
-- **TallmanChatService** - Main Node.js application server
-- **TallmanBackendService** - Database and backend operations
-- **TallmanLDAPAuthService** - LDAP authentication service
+### **Step 5: Verify Installation**
+```bash
+# Test UI access
+curl http://localhost:3230
+
+# Test API
+curl http://localhost:3231/api/health
+
+# Test LLM functionality
+curl -X POST http://localhost:3231/api/llm-test
+```
 
 ---
 
@@ -139,10 +129,18 @@ const LDAP_CONFIG = {
 
 ## 🤖 **AI Model Configuration**
 
-### **Ollama Host** (`hooks/useChat.ts`)
-```typescript
-const ollamaHost = 'http://10.10.20.24:11434';  // Ollama server IP
-const ollamaModel = 'llama3.2:latest';          // Available model
+### **Primary AI Model** (Google Gemini)
+```bash
+# Configure in .env.docker
+GEMINI_API_KEY=your_google_gemini_api_key_here
+GEMINI_MODEL=gemini-2.0-flash-exp
+```
+
+### **Secondary AI Model** (Docker Granite)
+```bash
+# Configure in .env.docker
+SECONDARY_LLM_BASE_URL=http://host.docker.internal:12435/v1
+SECONDARY_LLM_MODEL=granite-4.0-nano
 ```
 
 ### **System Instructions**
@@ -223,27 +221,35 @@ Installed automatically during service setup:
 ## 📊 **Application URLs**
 
 ### **Production URLs**
-- **IIS Access**: `http://chat.tallman.com` (after DNS)
-- **Direct Access**: `http://10.10.20.9:3003`
-- **Local Test**: `http://localhost:3003`
+- **Direct Access**: `http://localhost:3230`
+- **API Access**: `http://localhost:3231/api`
+- **Granite API**: `http://localhost:12435/v1/chat/completions`
 
 ### **API Endpoints**
 - `GET /api/health` - Service health check
-- `POST /api/ollama/chat` - AI chat with streaming
-- `GET /*` - React SPA routing
+- `POST /api/chat/send` - Send chat messages
+- `POST /api/chat/stream` - Streaming chat responses
+- `POST /api/llm-test` - Test LLM functionality
+- `GET /api/knowledge` - Get knowledge base
+- `POST /api/knowledge` - Add knowledge items
+- `GET /api/users` - Get approved users
+- `POST /api/users` - Add approved users
 
 ---
 
 ## 🔒 **Security Configuration**
 
-### **SSL Configuration** (Optional)
-```powershell
-.\setup-ssl.ps1
-https-service.bat
+### **Environment Variables**
+```bash
+# Secure API keys in .env.docker (not committed to git)
+GEMINI_API_KEY=your_secure_api_key_here
+
+# LDAP credentials (if used)
+LDAP_BIND_PASSWORD=your_secure_password
 ```
 
 ### **Access Control**
-- User authentication via LDAP
+- User authentication via LDAP/Active Directory
 - Role-based permissions (user/admin)
 - Session management
 - CORS enabled for internal services
@@ -252,19 +258,28 @@ https-service.bat
 
 ## 📈 **Monitoring & Logs**
 
-### **Service Logs**
-```cmd
-nssm view TallmanChatService AppStdout
-nssm view TallmanChatService AppStderr
-nssm view TallmanBackendService AppStdout
-nssm view TallmanLDAPAuthService AppStdout
+### **Container Logs**
+```bash
+# View container logs
+docker logs tallmanchat-sales-tallman-chat-1
+
+# View Docker Compose logs
+docker-compose logs
+
+# Follow logs in real-time
+docker-compose logs -f
 ```
 
 ### **Health Checks**
 ```bash
-curl http://localhost:3003/api/health
-curl http://localhost:3006/api/health
-curl http://10.10.20.24:11434/api/tags
+# Test UI
+curl http://localhost:3230
+
+# Test API health
+curl http://localhost:3231/api/health
+
+# Test LLM functionality
+curl -X POST http://localhost:3231/api/llm-test
 ```
 
 ---
@@ -272,34 +287,35 @@ curl http://10.10.20.24:11434/api/tags
 ## 🛑 **Troubleshooting**
 
 ### **Common Issues**
-1. **Port conflicts**: Check with `netstat -ano | findstr ":3003"`
-2. **IIS not serving**: Ensure web.config in `C:\inetpub\TallmanChat`
-3. **Model not found**: Verify Ollama has `llama3.2:latest`
-4. **Authentication fails**: Check LDAP server connectivity
+1. **Container not starting**: Check Docker Desktop is running
+2. **Port conflicts**: Check with `netstat -ano | findstr ":3230"`
+3. **Gemini API key invalid**: Verify key in `.env.docker`
+4. **Granite model not found**: Run `docker model pull ai/granite-4.0-nano:latest`
+5. **Authentication fails**: Check LDAP server connectivity
 
 ### **Reset Procedures**
-```cmd
-REM Stop all services
-uninstall-services.bat
+```bash
+# Stop and remove containers
+docker-compose down
 
-REM Clear cache and rebuild
-npm run build
-install-service.bat
+# Rebuild and restart
+docker-compose up --build -d
+
+# Check logs
+docker-compose logs
 ```
 
 ---
 
 ## ✅ **Installation Checklist**
 
-- [ ] Node.js 18+ installed
-- [ ] IIS with ARR enabled
-- [ ] Repository cloned to `C:\inetpub\TallmanChat`
-- [ ] Dependencies installed (`npm install`)
-- [ ] Ollama running on 10.10.20.24 with llama3.2:latest
-- [ ] IIS reverse proxy configured
-- [ ] Production build completed (`npm run build`)
-- [ ] Windows services installed and running
-- [ ] DNS record `chat.tallman.com` → `10.10.20.9` added
-- [ ] Application accessible at `http://chat.tallman.com`
+- [ ] Docker Desktop installed and running
+- [ ] Repository cloned to `c:\Users\rober\TallmanChat\TallmanChat-Sales`
+- [ ] Environment configured in `.env.docker`
+- [ ] Docker AI models available (`docker model ls`)
+- [ ] Containers built and running (`docker-compose up -d`)
+- [ ] UI accessible at `http://localhost:3230`
+- [ ] API responding at `http://localhost:3231/api/health`
+- [ ] LLM test working (`curl -X POST http://localhost:3231/api/llm-test`)
 
 **🎉 Installation Complete!**
