@@ -38,7 +38,6 @@ COPY --from=frontend-build /app/dist ./dist
 COPY server/ ./server/
 
 # Copy environment files
-COPY .env.local ./.env.local
 COPY .env.docker ./.env.docker
 
 # Mount host docker binary for model commands

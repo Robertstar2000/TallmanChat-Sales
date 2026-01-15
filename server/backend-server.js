@@ -8,6 +8,7 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const fs = require('fs');
 const { networkInterfaces } = require('os');
 const fetch = require('node-fetch');
 const bcrypt = require('bcryptjs');
@@ -69,14 +70,14 @@ if (OLLAMA_HOST.includes(':')) {
 const OLLAMA_API_URL = `http://${OLLAMA_HOST}:${OLLAMA_PORT}/api/generate`;
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.1:8b'; // Stable working model
 
-// Secondary LLM Configuration (OpenAI-compatible)
-let SECONDARY_LLM_BASE_URL = process.env.SECONDARY_LLM_BASE_URL || 'http://host.docker.internal:12434/engines/v1';
+// Secondary LLM Configuration (OpenAI-compatible) - Docker Granite
+let SECONDARY_LLM_BASE_URL = process.env.SECONDARY_LLM_BASE_URL || 'http://127.0.0.1:12435/v1';
 SECONDARY_LLM_BASE_URL = SECONDARY_LLM_BASE_URL.split('localhost').join('127.0.0.1').split('::1').join('127.0.0.1');
-const SECONDARY_LLM_MODEL = process.env.SECONDARY_LLM_MODEL || 'ai/granite-4.0-micro';
+const SECONDARY_LLM_MODEL = process.env.SECONDARY_LLM_MODEL || 'ai/granite-4.0-nano:latest';
 
 // Tertiary LLM Configuration (Google Gemini)
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-pro';
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.0-flash-exp';
 
 console.log(`🤖 Primary LLM: Gemini model ${GEMINI_MODEL}`);
 console.log(`🤖 Secondary LLM: ${SECONDARY_LLM_MODEL} at ${SECONDARY_LLM_BASE_URL}`);
@@ -345,16 +346,84 @@ let chatService;
 let dbService;
 let knowledgeService;
 
-// In-memory storage - but also respect authenticated users
-const mockUsers = [
-    { username: 'BobM', role: 'admin' },
-    { username: 'robertstar@aol.com', role: 'admin', backdoor: true }
-];
-const mockKnowledge = [];
-let authenticatedUsers = new Map(); // Track authenticated users and their admin status
+// File-based persistent storage
+const USERS_FILE = path.join(__dirname, '..', 'users.json');
+const ADMINS_FILE = path.join(__dirname, '..', 'admins.json');
+const KNOWLEDGE_FILE = path.join(__dirname, '..', 'knowledge.json');
 
-// Email/Password user storage (temporary replacement for LDAP)
-const emailPasswordUsers = new Map(); // email -> { email, passwordHash, role, createdAt }
+// Load persistent data
+function loadPersistentData() {
+    // Load users
+    let emailPasswordUsers = new Map();
+    if (fs.existsSync(USERS_FILE)) {
+        try {
+            const usersData = JSON.parse(fs.readFileSync(USERS_FILE, 'utf8'));
+            emailPasswordUsers = new Map(Object.entries(usersData));
+        } catch (error) {
+            console.error('Error loading users file:', error);
+        }
+    }
+
+    // Load admins
+    let mockUsers = [
+        { username: 'BobM', role: 'admin' },
+        { username: 'robertstar@aol.com', role: 'admin', backdoor: true }
+    ];
+    if (fs.existsSync(ADMINS_FILE)) {
+        try {
+            mockUsers = JSON.parse(fs.readFileSync(ADMINS_FILE, 'utf8'));
+        } catch (error) {
+            console.error('Error loading admins file:', error);
+        }
+    }
+
+    // Load knowledge
+    let mockKnowledge = [];
+    if (fs.existsSync(KNOWLEDGE_FILE)) {
+        try {
+            mockKnowledge = JSON.parse(fs.readFileSync(KNOWLEDGE_FILE, 'utf8'));
+        } catch (error) {
+            console.error('Error loading knowledge file:', error);
+        }
+    }
+
+    return { emailPasswordUsers, mockUsers, mockKnowledge };
+}
+
+// Save persistent data
+function saveUsers(users) {
+    try {
+        const usersObject = Object.fromEntries(users);
+        fs.writeFileSync(USERS_FILE, JSON.stringify(usersObject, null, 2));
+    } catch (error) {
+        console.error('Error saving users file:', error);
+    }
+}
+
+function saveAdmins(admins) {
+    try {
+        fs.writeFileSync(ADMINS_FILE, JSON.stringify(admins, null, 2));
+    } catch (error) {
+        console.error('Error saving admins file:', error);
+    }
+}
+
+function saveKnowledge(knowledge) {
+    try {
+        fs.writeFileSync(KNOWLEDGE_FILE, JSON.stringify(knowledge, null, 2));
+    } catch (error) {
+        console.error('Error saving knowledge file:', error);
+    }
+}
+
+// Load data
+const persistentData = loadPersistentData();
+let mockUsers = persistentData.mockUsers;
+let mockKnowledge = persistentData.mockKnowledge;
+let authenticatedUsers = new Map(); // Track authenticated users and their admin status (in-memory only)
+
+// Email/Password user storage (persistent)
+let emailPasswordUsers = persistentData.emailPasswordUsers;
 
 async function loadServices() {
     dbService = {
@@ -409,7 +478,7 @@ async function loadServices() {
     
     knowledgeService = {
         retrieveContext: (query) => {
-            const matches = mockKnowledge.filter(item => 
+            const matches = mockKnowledge.filter(item =>
                 item.toLowerCase().includes(query.toLowerCase())
             );
             return Promise.resolve(matches.slice(0, 5));
@@ -417,10 +486,12 @@ async function loadServices() {
         getAllKnowledge: () => Promise.resolve([...mockKnowledge]),
         addKnowledge: (content) => {
             mockKnowledge.push(content);
+            saveKnowledge(mockKnowledge); // Persist to file
             return Promise.resolve();
         },
         clearAllKnowledge: () => {
             mockKnowledge.length = 0;
+            saveKnowledge(mockKnowledge); // Persist to file
             return Promise.resolve();
         }
     };
@@ -487,6 +558,7 @@ app.post('/api/auth/signup', async (req, res) => {
 
         // Store user
         emailPasswordUsers.set(email.toLowerCase(), user);
+        saveUsers(emailPasswordUsers); // Persist to file
 
         console.log(`✅ New user registered: ${email}`);
 
@@ -583,15 +655,19 @@ app.post('/api/auth/login', async (req, res) => {
             });
         }
 
-        console.log(`✅ User logged in: ${email}`);
+        // Check if user is in admin list
+        const adminUser = mockUsers.find(u => u.username === email || u.username === email.split('@')[0]);
+        const isAdmin = adminUser && adminUser.role === 'admin';
+
+        console.log(`✅ User logged in: ${email}${isAdmin ? ' (admin)' : ''}`);
 
         res.json({
             success: true,
             user: {
                 username: email,
                 email: user.email,
-                role: user.role,
-                admin: user.role === 'admin'
+                role: isAdmin ? 'admin' : user.role,
+                admin: isAdmin
             },
             message: 'Login successful'
         });
@@ -982,6 +1058,7 @@ app.post('/api/users', async (req, res) => {
     try {
         const { username, role } = req.body;
         await dbService.addOrUpdateApprovedUser({ username, role: role || 'user' });
+        saveAdmins(mockUsers); // Persist to file
         res.json({ success: true, message: 'User added' });
     } catch (error) {
         console.error('User addition error:', error);
@@ -993,6 +1070,7 @@ app.delete('/api/users/:username', async (req, res) => {
     try {
         const { username } = req.params;
         await dbService.deleteApprovedUser(username);
+        saveAdmins(mockUsers); // Persist to file
         res.json({ success: true, message: 'User deleted' });
     } catch (error) {
         console.error('User deletion error:', error);
@@ -1066,6 +1144,77 @@ app.post('/api/llm-test', async (req, res) => {
     }
 });
 
+// Backup endpoint
+app.get('/api/backup', async (req, res) => {
+    try {
+        const backupData = {
+            timestamp: new Date().toISOString(),
+            version: '1.0',
+            data: {
+                users: Object.fromEntries(emailPasswordUsers),
+                admins: mockUsers,
+                knowledge: mockKnowledge
+            }
+        };
+
+        const backupFilename = `tallman-backup-${new Date().toISOString().split('T')[0]}.json`;
+
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Content-Disposition', `attachment; filename="${backupFilename}"`);
+        res.json(backupData);
+
+        console.log('✅ Backup created and downloaded');
+    } catch (error) {
+        console.error('Backup error:', error);
+        res.status(500).json({ error: 'Failed to create backup' });
+    }
+});
+
+// Restore endpoint
+app.post('/api/restore', async (req, res) => {
+    try {
+        const { data } = req.body;
+
+        if (!data) {
+            return res.status(400).json({ error: 'Backup data is required' });
+        }
+
+        // Validate backup structure
+        if (!data.users || !data.admins || !data.knowledge) {
+            return res.status(400).json({ error: 'Invalid backup format' });
+        }
+
+        // Restore data
+        emailPasswordUsers = new Map(Object.entries(data.users));
+        mockUsers = data.admins;
+        mockKnowledge = data.knowledge;
+
+        // Save to files
+        saveUsers(emailPasswordUsers);
+        saveAdmins(mockUsers);
+        saveKnowledge(mockKnowledge);
+
+        console.log('✅ Data restored from backup');
+        console.log(`- Users: ${emailPasswordUsers.size}`);
+        console.log(`- Admins: ${mockUsers.length}`);
+        console.log(`- Knowledge items: ${mockKnowledge.length}`);
+
+        res.json({
+            success: true,
+            message: 'Data restored successfully',
+            restored: {
+                users: emailPasswordUsers.size,
+                admins: mockUsers.length,
+                knowledge: mockKnowledge.length
+            }
+        });
+
+    } catch (error) {
+        console.error('Restore error:', error);
+        res.status(500).json({ error: 'Failed to restore data' });
+    }
+});
+
 // Status endpoint
 app.get('/api/status', (req, res) => {
     res.json({
@@ -1114,14 +1263,17 @@ const server = app.listen(PORT, '0.0.0.0', async (err) => {
     console.log();
     console.log('📊 Endpoints:');
     console.log('   POST /api/auth/login     - User authentication');
+    console.log('   POST /api/auth/signup    - User registration');
     console.log('   POST /api/chat/send      - Chat messages');
     console.log('   POST /api/chat/stream    - Streaming chat');
     console.log('   GET  /api/knowledge      - Get knowledge base');
     console.log('   POST /api/knowledge      - Add knowledge');
     console.log('   DELETE /api/knowledge    - Clear knowledge');
-    console.log('   GET  /api/users          - Get users');
-    console.log('   POST /api/users          - Add user');
-    console.log('   DELETE /api/users/:user  - Delete user');
+    console.log('   GET  /api/users          - Get admin users');
+    console.log('   POST /api/users          - Add admin user');
+    console.log('   DELETE /api/users/:user  - Delete admin user');
+    console.log('   GET  /api/backup         - Download backup');
+    console.log('   POST /api/restore        - Restore from backup');
     console.log();
     console.log('🚀 Loading services...');
 

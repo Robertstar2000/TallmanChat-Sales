@@ -35,6 +35,10 @@ export default defineConfig(({ mode }) => {
             }
           }
         }
-      }
+      },
+      preview: {
+        allowedHosts: ["apps.tallmanequipment.com", ".tallmanequipment.com"],
+        https: {},
+      },
     };
 });

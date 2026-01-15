@@ -74,7 +74,7 @@ const UserManagement: React.FC<{ setFeedback: (msg: string) => void }> = ({ setF
       <div>
         <h3 className="text-xl font-bold text-gray-900 dark:text-white">User Management</h3>
         <p className="text-gray-500 dark:text-gray-400 mt-2 mb-4">
-          Manage users who are approved to use this application. Users must also exist in the LDAP directory to log in.
+          Manage users who are approved to use this application. Users must also be Tallman Employees with a .tallmanequipment email to log in.
         </p>
 
         {/* Add User Form */}
@@ -318,25 +318,33 @@ const KnowledgeManagement: React.FC<{ setFeedback: (msg: string) => void }> = ({
 
 
 const AISettings: React.FC<{ setFeedback: (msg: string) => void }> = ({ setFeedback }) => {
-  const [ollamaHost, setOllamaHost] = useState(() => {
-    return localStorage.getItem('ollamaHost') || 'http://localhost:11434';
+  // Current LLM configuration - Primary: Gemini, Secondary: Docker Granite
+  const [primaryHost, setPrimaryHost] = useState(() => {
+    return localStorage.getItem('primaryHost') || 'https://generativelanguage.googleapis.com/v1beta';
   });
-  const [ollamaModel, setOllamaModel] = useState(() => {
-    return localStorage.getItem('ollamaModel') || 'llama3.1:8b';
+  const [primaryModel, setPrimaryModel] = useState(() => {
+    return localStorage.getItem('primaryModel') || 'gemini-2.0-flash-exp';
+  });
+  const [secondaryHost, setSecondaryHost] = useState(() => {
+    return localStorage.getItem('secondaryHost') || 'http://127.0.0.1:12435/v1';
+  });
+  const [secondaryModel, setSecondaryModel] = useState(() => {
+    return localStorage.getItem('secondaryModel') || 'ai/granite-4.0-nano:latest';
   });
   const [isTestingLLM, setIsTestingLLM] = useState(false);
   const [testOutput, setTestOutput] = useState('');
 
   const saveSettings = () => {
-    localStorage.setItem('aiProvider', 'ollama');
-    localStorage.setItem('ollamaHost', ollamaHost);
-    localStorage.setItem('ollamaModel', ollamaModel);
+    localStorage.setItem('primaryHost', primaryHost);
+    localStorage.setItem('primaryModel', primaryModel);
+    localStorage.setItem('secondaryHost', secondaryHost);
+    localStorage.setItem('secondaryModel', secondaryModel);
     setFeedback('AI settings saved successfully. Please refresh the page for changes to take effect.');
   };
 
   const testLLMConnection = async () => {
     setIsTestingLLM(true);
-    setFeedback('Testing Ollama connection...');
+    setFeedback('Testing AI connections...');
     setTestOutput('');
 
     try {
@@ -348,16 +356,16 @@ const AISettings: React.FC<{ setFeedback: (msg: string) => void }> = ({ setFeedb
       });
 
       const result = await response.json();
-      
+
       const diagnostics = [
-        `Endpoint: ${result.testTarget || ollamaHost}`,
-        `Model: ${result.model || ollamaModel}`,
+        `Primary LLM: ${result.testTarget || primaryHost} (${primaryModel})`,
+        `Secondary LLM: ${secondaryHost} (${secondaryModel})`,
         `Status: ${result.success ? 'Connected ✓' : 'Failed ✗'}`,
         ``,
         `Output:`,
         result.output || result.error || 'No output received'
       ].join('\n');
-      
+
       setTestOutput(diagnostics);
 
       if (result.success) {
@@ -367,7 +375,7 @@ const AISettings: React.FC<{ setFeedback: (msg: string) => void }> = ({ setFeedb
       }
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-      setTestOutput(`Connection Error:\n${errorMsg}\n\nPlease verify:\n- Ollama is running\n- Endpoint URL is correct\n- Model is installed`);
+      setTestOutput(`Connection Error:\n${errorMsg}\n\nPlease verify:\n- AI services are running\n- Endpoint URLs are correct\n- Models are available`);
       setFeedback('❌ Connection failed: Network error');
       console.error('LLM test error:', error);
     } finally {
@@ -377,41 +385,73 @@ const AISettings: React.FC<{ setFeedback: (msg: string) => void }> = ({ setFeedb
 
   return (
     <div>
-      <h3 className="text-xl font-bold text-gray-900 dark:text-white">Ollama Settings</h3>
+      <h3 className="text-xl font-bold text-gray-900 dark:text-white">AI Settings</h3>
       <p className="text-gray-500 dark:text-gray-400 mt-2 mb-4">
-        Configure Ollama endpoint and model for local AI chat.
+        Current AI configuration: Primary LLM (Gemini {primaryModel}), Secondary LLM (Docker Granite {secondaryModel}).
       </p>
 
       <div className="space-y-4 p-4 bg-gray-100 dark:bg-gray-800/50 rounded-lg">
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            Endpoint URL
+            Primary LLM Endpoint URL
           </label>
           <input
             type="text"
-            value={ollamaHost}
-            onChange={(e) => setOllamaHost(e.target.value)}
+            value={primaryHost}
+            onChange={(e) => setPrimaryHost(e.target.value)}
             className="w-full bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-gray-200 rounded-md p-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-            placeholder="http://localhost:11434"
+            placeholder="https://generativelanguage.googleapis.com/v1beta"
           />
           <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-            Default: http://localhost:11434
+            Primary: {primaryHost}
           </p>
         </div>
-        
+
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            Model Name
+            Primary LLM Model Name
           </label>
           <input
             type="text"
-            value={ollamaModel}
-            onChange={(e) => setOllamaModel(e.target.value)}
+            value={primaryModel}
+            onChange={(e) => setPrimaryModel(e.target.value)}
             className="w-full bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-gray-200 rounded-md p-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-            placeholder="llama3.1:8b"
+            placeholder="gemini-2.0-flash-exp"
           />
           <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-            Default: llama3.1:8b
+            Primary: {primaryModel}
+          </p>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            Secondary LLM Endpoint URL
+          </label>
+          <input
+            type="text"
+            value={secondaryHost}
+            onChange={(e) => setSecondaryHost(e.target.value)}
+            className="w-full bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-gray-200 rounded-md p-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+            placeholder="http://127.0.0.1:12435/v1"
+          />
+          <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+            Secondary: {secondaryHost}
+          </p>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            Secondary LLM Model Name
+          </label>
+          <input
+            type="text"
+            value={secondaryModel}
+            onChange={(e) => setSecondaryModel(e.target.value)}
+            className="w-full bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-gray-200 rounded-md p-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+            placeholder="ai/granite-4.0-nano:latest"
+          />
+          <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+            Secondary: {secondaryModel}
           </p>
         </div>
 

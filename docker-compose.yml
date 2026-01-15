@@ -12,11 +12,9 @@ services:
       - BACKEND_SERVICE_HOST=localhost
       - BACKEND_SERVICE_PORT=3231
       - UI_PORT=3230
-      - DOCKER_HOST=unix:///var/run/docker.sock
+      - PORT=3231
     volumes:
       - ./logs:/app/logs
-      - /var/run/docker.sock:/var/run/docker.sock
-      - "/c/Program Files/Docker/Docker/resources/bin/docker:/usr/local/bin/docker-host:ro"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
