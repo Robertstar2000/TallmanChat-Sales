@@ -939,22 +939,52 @@ ${context.map(item => `- ${item}`).join('\n')}`);
         }
 
         if (groundingResults.success && groundingResults.results.length > 0) {
-            contextSections.push(`TALLMAN EQUIPMENT WEBSITE RESOURCES:
-${groundingResults.results.slice(0, 5).map(r => `- ${r.title}: ${r.link}${r.snippet ? '\n  ' + r.snippet.substring(0, 100) : ''}`).join('\n')}`);
+            // Format grounding results with prominent URLs
+            const formattedResults = groundingResults.results.slice(0, 5).map(r => {
+                return `📎 PAGE: ${r.title}
+   🔗 URL: ${r.link}
+   📝 SNIPPET: ${r.snippet ? r.snippet.substring(0, 150) : 'Visit this page for more information'}`;
+            }).join('\n\n');
+
+            contextSections.push(`TALLMAN EQUIPMENT WEBSITE CATALOG LINKS (YOU MUST USE THESE URLs IN YOUR RESPONSE):
+${formattedResults}
+
+⚠️ IMPORTANT: Copy and paste the exact URLs above into your response as markdown links like: [Page Title](URL)`);
         }
 
         if (contextSections.length > 0) {
-            enhancedPrompt = `You are a helpful Tallman Equipment sales and support assistant. Use the following information to answer the question. When discussing equipment, services, or purchases, include relevant links from the website resources provided.
+            enhancedPrompt = `You are a Tallman Equipment sales and support assistant. Your responses should help customers find and purchase equipment.
 
 ${contextSections.join('\n\n')}
 
 CUSTOMER QUESTION: ${message}
 
+CRITICAL INSTRUCTIONS - YOU MUST FOLLOW THESE:
+1. If ANY website URL from tallmanequipment.com is provided above that relates to the customer's question, you MUST include that link in your response
+2. Format ALL links as clickable markdown: [Descriptive Text](https://www.tallmanequipment.com/...)
+3. When discussing equipment types (bucket trucks, digger derricks, aerial lifts, etc.), ALWAYS include the catalog link
+4. When discussing services (rentals, repairs, parts), ALWAYS include the relevant service page link
+5. End your response with a clear call-to-action directing the customer to visit the specific page for more details or to make a purchase
+6. If multiple relevant links are available, include ALL of them organized by category
+
+EXAMPLE FORMAT:
+"For bucket trucks, you can browse our full selection at [Bucket Trucks Catalog](https://www.tallmanequipment.com/equipment/bucket-trucks). 
+To discuss rentals, visit our [Rental Services](https://www.tallmanequipment.com/rentals) page."
+
+YOUR RESPONSE (remember to include website links):`;
+        } else {
+            // Even without grounding results, encourage linking to the main site
+            enhancedPrompt = `You are a Tallman Equipment sales and support assistant. 
+
+CUSTOMER QUESTION: ${message}
+
 INSTRUCTIONS:
-1. Answer the question helpfully and professionally
-2. Include relevant website links when discussing products, services, rentals, or purchases
-3. Format links as clickable markdown: [Link Text](URL)
-4. If the customer asks where to buy or get more info, direct them to the appropriate Tallman website page
+1. Answer helpfully and professionally as a Tallman Equipment representative
+2. When appropriate, direct customers to visit https://www.tallmanequipment.com for more information
+3. For equipment inquiries, suggest visiting the catalog at https://www.tallmanequipment.com/equipment
+4. For rental inquiries, direct to https://www.tallmanequipment.com/rentals
+5. For service/parts inquiries, direct to https://www.tallmanequipment.com/services
+6. For contact information, direct to https://www.tallmanequipment.com/contact
 
 YOUR RESPONSE:`;
         }
@@ -1033,18 +1063,39 @@ ${context.map(item => `- ${item}`).join('\n')}`);
         }
 
         if (groundingResults.success && groundingResults.results.length > 0) {
-            contextSections.push(`WEBSITE RESOURCES:
-${groundingResults.results.slice(0, 5).map(r => `- ${r.title}: ${r.link}`).join('\n')}`);
+            const formattedResults = groundingResults.results.slice(0, 5).map(r =>
+                `📎 ${r.title}\n   🔗 URL: ${r.link}`
+            ).join('\n\n');
+
+            contextSections.push(`WEBSITE CATALOG LINKS (INCLUDE THESE IN YOUR RESPONSE):
+${formattedResults}`);
         }
 
         if (contextSections.length > 0) {
-            enhancedPrompt = `You are a Tallman Equipment assistant. Use this information to help the customer. Include relevant website links in your response.
+            enhancedPrompt = `You are a Tallman Equipment sales assistant. Help customers find and purchase equipment.
 
 ${contextSections.join('\n\n')}
 
-Question: ${message}
+CUSTOMER QUESTION: ${message}
 
-Answer helpfully and include links:`;
+CRITICAL INSTRUCTIONS:
+1. You MUST include any tallmanequipment.com URLs provided above in your response
+2. Format links as: [Description](URL)
+3. Always include catalog links when discussing equipment
+4. End with a call-to-action to visit the relevant page
+
+YOUR RESPONSE (include website links):`;
+        } else {
+            enhancedPrompt = `You are a Tallman Equipment sales assistant.
+
+CUSTOMER QUESTION: ${message}
+
+INSTRUCTIONS:
+1. Answer as a Tallman Equipment representative
+2. Direct to https://www.tallmanequipment.com for equipment browsing
+3. Direct to https://www.tallmanequipment.com/contact for inquiries
+
+YOUR RESPONSE:`;
         }
 
         // Use LLM with fallback
