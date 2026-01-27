@@ -13,6 +13,7 @@ const { networkInterfaces } = require('os');
 const fetch = require('node-fetch');
 const bcrypt = require('bcryptjs');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { groundQuery, enhanceResponseWithLinks } = require('./grounding-service');
 
 // Load environment variables from .env.local or .env.docker
 const envLocalPath = path.join(__dirname, '..', '.env.local');
@@ -475,7 +476,7 @@ async function loadServices() {
             return false;
         }
     };
-    
+
     knowledgeService = {
         retrieveContext: (query) => {
             const matches = mockKnowledge.filter(item =>
@@ -495,11 +496,11 @@ async function loadServices() {
             return Promise.resolve();
         }
     };
-    
-    chatService = { 
+
+    chatService = {
         sendMessage: () => Promise.resolve('Backend service active')
     };
-    
+
     console.log('✅ Services loaded successfully');
 }
 
@@ -898,16 +899,48 @@ app.post('/api/chat/send', async (req, res) => {
         const context = await knowledgeService.retrieveContext(message);
         console.log('Found context items:', context.length);
 
-        // Prepare enhanced prompt
+        // Ground the query with web search for Tallman Equipment info
+        let groundingResults = { success: false, results: [], context: '' };
+        try {
+            groundingResults = await groundQuery(message, {
+                googleApiKey: GEMINI_API_KEY, // Use Gemini API key for potential Google services
+                googleSearchEngineId: process.env.GOOGLE_SEARCH_ENGINE_ID
+            });
+            console.log(`🌐 Grounding: ${groundingResults.success ? groundingResults.results.length + ' results' : 'no results'} from ${groundingResults.source}`);
+        } catch (groundingError) {
+            console.log('⚠️ Grounding failed (continuing without):', groundingError.message);
+        }
+
+        // Prepare enhanced prompt with knowledge base AND grounding
         let enhancedPrompt = message;
+
+        // Build context sections
+        let contextSections = [];
+
         if (context.length > 0) {
-            enhancedPrompt = `Use the following information from Tallman Equipment's knowledge base to answer the question:
+            contextSections.push(`KNOWLEDGE BASE INFORMATION:
+${context.map(item => `- ${item}`).join('\n')}`);
+        }
 
-${context.map(item => `- ${item}`).join('\n')}
+        if (groundingResults.success && groundingResults.results.length > 0) {
+            contextSections.push(`TALLMAN EQUIPMENT WEBSITE RESOURCES:
+${groundingResults.results.slice(0, 5).map(r => `- ${r.title}: ${r.link}${r.snippet ? '\n  ' + r.snippet.substring(0, 100) : ''}`).join('\n')}`);
+        }
 
-Question: ${message}
+        if (contextSections.length > 0) {
+            enhancedPrompt = `You are a helpful Tallman Equipment sales and support assistant. Use the following information to answer the question. When discussing equipment, services, or purchases, include relevant links from the website resources provided.
 
-Answer as a knowledgeable Tallman employee:`;
+${contextSections.join('\n\n')}
+
+CUSTOMER QUESTION: ${message}
+
+INSTRUCTIONS:
+1. Answer the question helpfully and professionally
+2. Include relevant website links when discussing products, services, rentals, or purchases
+3. Format links as clickable markdown: [Link Text](URL)
+4. If the customer asks where to buy or get more info, direct them to the appropriate Tallman website page
+
+YOUR RESPONSE:`;
         }
 
         // Use LLM with fallback
@@ -928,10 +961,19 @@ Answer as a knowledgeable Tallman employee:`;
             aiResponse = llmResult.fallbackMessage;
         }
 
+        // Enhance response with grounding links if not already included
+        if (groundingResults.success && !aiResponse.includes('tallmanequipment.com')) {
+            aiResponse = enhanceResponseWithLinks(aiResponse, groundingResults.results);
+        }
+
         // Return the AI response
         res.json({
             response: aiResponse,
             context: context.length > 0 ? context.slice(0, 3) : null,
+            grounding: groundingResults.success ? {
+                source: groundingResults.source,
+                links: groundingResults.results.slice(0, 3).map(r => ({ title: r.title, url: r.link }))
+            } : null,
             llmSource: llmResult.source,
             model: llmResult.model
         });
@@ -950,48 +992,74 @@ app.post('/api/chat/stream', async (req, res) => {
     try {
         const { message, history } = req.body;
 
-        // Get context
+        // Get context from knowledge base
         const context = await knowledgeService.retrieveContext(message);
 
-        // Build enhanced prompt
+        // Ground the query with web search for Tallman Equipment info
+        let groundingResults = { success: false, results: [], context: '' };
+        try {
+            groundingResults = await groundQuery(message, {
+                googleApiKey: GEMINI_API_KEY,
+                googleSearchEngineId: process.env.GOOGLE_SEARCH_ENGINE_ID
+            });
+            console.log(`🌐 Stream Grounding: ${groundingResults.success ? groundingResults.results.length + ' results' : 'no results'}`);
+        } catch (groundingError) {
+            console.log('⚠️ Stream grounding failed:', groundingError.message);
+        }
+
+        // Build enhanced prompt with knowledge base AND grounding
         let enhancedPrompt = message;
+        let contextSections = [];
+
         if (context.length > 0) {
-            enhancedPrompt = `Context from Tallman knowledge base:
-${context.map(item => `- ${item}`).join('\n')}
+            contextSections.push(`KNOWLEDGE BASE:
+${context.map(item => `- ${item}`).join('\n')}`);
+        }
+
+        if (groundingResults.success && groundingResults.results.length > 0) {
+            contextSections.push(`WEBSITE RESOURCES:
+${groundingResults.results.slice(0, 5).map(r => `- ${r.title}: ${r.link}`).join('\n')}`);
+        }
+
+        if (contextSections.length > 0) {
+            enhancedPrompt = `You are a Tallman Equipment assistant. Use this information to help the customer. Include relevant website links in your response.
+
+${contextSections.join('\n\n')}
 
 Question: ${message}
 
-Answer helpfully as a Tallman Equipment employee:`;
+Answer helpfully and include links:`;
         }
 
-        // Use LLM with fallback (streaming not supported for secondary LLM yet)
+        // Use LLM with fallback
         const llmResult = await callLLMWithFallback(enhancedPrompt, { stream: false });
 
         let aiResponse;
         if (llmResult.success) {
             if (llmResult.source === 'ollama') {
-                // Ollama response format
                 const data = await llmResult.response.json();
                 aiResponse = data.response;
             } else {
-                // Secondary/Gemini response format
                 aiResponse = llmResult.response.text || 'No response from LLM';
             }
         } else {
-            // Fallback response
             aiResponse = llmResult.fallbackMessage;
         }
 
-        // For streaming, we'll just return the complete response as a single chunk
-        // (true streaming would require more complex implementation for secondary LLM)
+        // Enhance response with grounding links if not already included
+        if (groundingResults.success && !aiResponse.includes('tallmanequipment.com')) {
+            aiResponse = enhanceResponseWithLinks(aiResponse, groundingResults.results);
+        }
+
+        // For streaming, return the complete response as SSE
         res.setHeader('Content-Type', 'text/event-stream');
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Connection', 'keep-alive');
 
-        // Send the response as streaming data
         res.write(`data: ${JSON.stringify({
             response: aiResponse,
             done: true,
+            grounding: groundingResults.success ? groundingResults.source : null,
             llmSource: llmResult.source,
             model: llmResult.model
         })}\n\n`);
