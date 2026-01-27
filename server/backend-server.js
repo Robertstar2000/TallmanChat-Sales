@@ -348,9 +348,25 @@ let dbService;
 let knowledgeService;
 
 // File-based persistent storage
-const USERS_FILE = path.join(__dirname, '..', 'users.json');
-const ADMINS_FILE = path.join(__dirname, '..', 'admins.json');
-const KNOWLEDGE_FILE = path.join(__dirname, '..', 'knowledge.json');
+// In Docker: /app/data is mounted as a persistent volume
+// See docker-compose.yml (Desktop) and docker-compose.swarm.yml (Swarm)
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
+
+// Ensure data directory exists
+if (!fs.existsSync(DATA_DIR)) {
+    try {
+        fs.mkdirSync(DATA_DIR, { recursive: true });
+        console.log(`📁 Created data directory: ${DATA_DIR}`);
+    } catch (err) {
+        console.error(`⚠️ Could not create data directory: ${err.message}`);
+    }
+}
+
+const USERS_FILE = path.join(DATA_DIR, 'users.json');
+const ADMINS_FILE = path.join(DATA_DIR, 'admins.json');
+const KNOWLEDGE_FILE = path.join(DATA_DIR, 'knowledge.json');
+
+console.log(`💾 Database files location: ${DATA_DIR}`);
 
 // Load persistent data
 function loadPersistentData() {

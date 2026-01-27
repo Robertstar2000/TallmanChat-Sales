@@ -7,6 +7,10 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Database/Data files (Docker persistent storage)
+data/
+*.json.bak
+
 # Dependency directories
 node_modules/
 jspm_packages/

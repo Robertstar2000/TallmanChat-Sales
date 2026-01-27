@@ -52,17 +52,36 @@ This document provides comprehensive deployment instructions for the Tallman Cha
 ## 🗄️ Persistence Compliance
 
 ### Data Storage Standards
-- **Logs**: Persisted to `/app/logs` (mapped to `./logs` locally or `/var/data/tallmanchat/logs` on Swarm)
-- **Application Data**: Persisted to `/app/data` (mapped to `/var/data/tallmanchat/data` on Swarm)
-- **Knowledge Base**: In-memory with optional file-based persistence
+
+| Data Type | Container Path | Docker Desktop Mount | Docker Swarm Mount |
+|-----------|----------------|---------------------|-------------------|
+| **Logs** | `/app/logs` | `./logs` | `/var/data/tallmanchat/logs` |
+| **Database** | `/app/data` | `./data` | `/var/data/tallmanchat/data` |
+
+### Database Files (Persisted in `/app/data`)
+- `users.json` - Email/password user accounts
+- `admins.json` - Admin user list and roles
+- `knowledge.json` - Knowledge base entries
+
+### Docker Desktop Local Storage
+```
+project-root/
+├── logs/           # Application logs (persistent)
+└── data/           # Database files (persistent)
+    ├── users.json
+    ├── admins.json
+    └── knowledge.json
+```
 
 ### Swarm NFS Requirements
 All persistent data must reside on the NFS share (`/var/data`) for cross-node portability:
 ```
 /var/data/tallmanchat/
 ├── logs/           # Application logs
-├── data/           # Knowledge base and user data
-└── config/         # Runtime configuration (if needed)
+└── data/           # Database files
+    ├── users.json
+    ├── admins.json
+    └── knowledge.json
 ```
 
 ---
