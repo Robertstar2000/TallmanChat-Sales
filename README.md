@@ -36,7 +36,8 @@ An advanced AI-powered chat application designed specifically for Tallman Equipm
 - 📚 RAG-powered knowledge base
 - 👥 Multi-user chat storage
 - 🎯 Industry-specific responses
-- 🔍 Intelligent knowledge retrieval
+- 🔍 Intelligent knowledge retrieval (RAG)
+- 🌐 Real-time Web Grounding (Google Search + DuckDuckGo)
 - 🐳 Docker containerization for easy deployment
 
 ---
