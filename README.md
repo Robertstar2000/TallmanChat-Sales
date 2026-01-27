@@ -41,7 +41,50 @@ An advanced AI-powered chat application designed specifically for Tallman Equipm
 
 ---
 
-## 🚀 **Quick Docker Deployment**
+## � **Verified Deployment Paths**
+
+| Environment | Target | Configuration | Command |
+|-------------|--------|---------------|---------|
+| **Local Developer** | Docker Desktop | `docker-compose.yml` | `docker-compose up --build` |
+| **Industrial Swarm** | Production Cluster | `docker-compose.swarm.yml` | `make deploy STACK=tallmanchat` |
+
+---
+
+## 📦 **Master Registry**
+
+**Repository**: [https://github.com/Robertstar2000/TallmanChat-Sales](https://github.com/Robertstar2000/TallmanChat-Sales)
+
+---
+
+## 🌐 **Network Access Points**
+
+### Docker Desktop (Development)
+| Service | URL | Port |
+|---------|-----|------|
+| UI Server | `http://localhost:3230` | 3230 |
+| Backend API | `http://localhost:3231/api` | 3231 |
+| Granite API | `http://localhost:12435` | 12435 |
+| Health Check | `http://localhost:3231/api/health` | 3231 |
+
+### Docker Swarm (Production)
+| Service | URL |
+|---------|-----|
+| UI & API | `https://tallmanchat.swarm.tallmanequipment.com` |
+| Traefik Dashboard | `https://traefik.swarm.tallmanequipment.com` |
+| Portainer | `https://portainer.swarm.tallmanequipment.com` |
+
+### Swarm Infrastructure IPs
+| Component | IP |
+|-----------|-----|
+| Manager Nodes | 10.10.20.36, 10.10.20.61, 10.10.20.63 |
+| NFS Storage | 10.10.20.64 |
+| Virtual IP (Keepalived) | 10.10.20.65 |
+
+---
+
+
+
+## �🚀 **Quick Docker Deployment**
 
 ### **Prerequisites**
 - Windows 10/11 or Windows Server 2019+
