@@ -921,7 +921,14 @@ app.post('/api/chat/send', async (req, res) => {
             if (!process.env.GOOGLE_SEARCH_ENGINE_ID) {
                 console.log('⚠️ Google Search Engine ID (GOOGLE_SEARCH_ENGINE_ID) is not set. Falling back to DuckDuckGo.');
             }
-            groundingResults = await groundQuery(message, {
+
+            // Extract actual question if it's an enhanced prompt from frontend
+            let groundingQuery = message;
+            if (message.includes('Question: ')) {
+                groundingQuery = message.split('Question: ').pop().trim();
+            }
+
+            groundingResults = await groundQuery(groundingQuery, {
                 googleApiKey: GEMINI_API_KEY, // Use Gemini API key for potential Google services
                 googleSearchEngineId: process.env.GOOGLE_SEARCH_ENGINE_ID
             });
@@ -1047,7 +1054,13 @@ app.post('/api/chat/stream', async (req, res) => {
         // Ground the query with web search for Tallman Equipment info
         let groundingResults = { success: false, results: [], context: '' };
         try {
-            groundingResults = await groundQuery(message, {
+            // Extract actual question if it's an enhanced prompt from frontend
+            let groundingQuery = message;
+            if (message.includes('Question: ')) {
+                groundingQuery = message.split('Question: ').pop().trim();
+            }
+
+            groundingResults = await groundQuery(groundingQuery, {
                 googleApiKey: GEMINI_API_KEY,
                 googleSearchEngineId: process.env.GOOGLE_SEARCH_ENGINE_ID
             });

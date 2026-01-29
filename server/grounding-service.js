@@ -24,6 +24,8 @@ async function searchGoogle(query, apiKey, searchEngineId) {
     }
 
     try {
+        console.log(`🔍 Trying Google Custom Search for: "${query}"`);
+
         // Use Google Custom Search API with site restriction
         const searchQuery = `site:${TALLMAN_SITE} ${query}`;
 
@@ -47,15 +49,17 @@ async function searchGoogle(query, apiKey, searchEngineId) {
                         snippet: item.snippet,
                         source: 'google'
                     }));
+                } else {
+                    console.log('ℹ️ Google Search: No items found in results');
                 }
+            } else {
+                console.log(`❌ Google Search: API responded with status ${response.status}`);
             }
+        } else {
+            console.log('⚠️ Google Search: No Search Engine ID provided');
         }
 
-        // Fallback: Use Google's JSON search (limited but no CSE required)
-        // This uses the "I'm Feeling Lucky" approach with site restriction
-        console.log('🔄 Trying Google site-restricted search...');
-        return null; // Let it fall through to DuckDuckGo
-
+        return null; // Fall through to DuckDuckGo
     } catch (error) {
         if (error.name === 'AbortError') {
             console.log('⏰ Google Search timed out');
