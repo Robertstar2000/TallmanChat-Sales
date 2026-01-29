@@ -918,6 +918,9 @@ app.post('/api/chat/send', async (req, res) => {
         // Ground the query with web search for Tallman Equipment info
         let groundingResults = { success: false, results: [], context: '' };
         try {
+            if (!process.env.GOOGLE_SEARCH_ENGINE_ID) {
+                console.log('⚠️ Google Search Engine ID (GOOGLE_SEARCH_ENGINE_ID) is not set. Falling back to DuckDuckGo.');
+            }
             groundingResults = await groundQuery(message, {
                 googleApiKey: GEMINI_API_KEY, // Use Gemini API key for potential Google services
                 googleSearchEngineId: process.env.GOOGLE_SEARCH_ENGINE_ID

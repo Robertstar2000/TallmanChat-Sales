@@ -26,17 +26,17 @@ async function searchGoogle(query, apiKey, searchEngineId) {
     try {
         // Use Google Custom Search API with site restriction
         const searchQuery = `site:${TALLMAN_SITE} ${query}`;
-        
+
         // If we have a custom search engine ID, use it
         if (searchEngineId) {
             const url = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${searchEngineId}&q=${encodeURIComponent(searchQuery)}&num=5`;
-            
+
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), SEARCH_TIMEOUT);
-            
+
             const response = await fetch(url, { signal: controller.signal });
             clearTimeout(timeoutId);
-            
+
             if (response.ok) {
                 const data = await response.json();
                 if (data.items && data.items.length > 0) {
@@ -50,12 +50,12 @@ async function searchGoogle(query, apiKey, searchEngineId) {
                 }
             }
         }
-        
+
         // Fallback: Use Google's JSON search (limited but no CSE required)
         // This uses the "I'm Feeling Lucky" approach with site restriction
         console.log('🔄 Trying Google site-restricted search...');
         return null; // Let it fall through to DuckDuckGo
-        
+
     } catch (error) {
         if (error.name === 'AbortError') {
             console.log('⏰ Google Search timed out');
@@ -75,66 +75,71 @@ async function searchGoogle(query, apiKey, searchEngineId) {
 async function searchDuckDuckGo(query) {
     try {
         console.log('🦆 Trying DuckDuckGo search...');
-        
+
         // DuckDuckGo Instant Answer API (limited but reliable)
         const searchQuery = `site:${TALLMAN_SITE} ${query}`;
         const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(searchQuery)}&format=json&no_redirect=1`;
-        
+
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), SEARCH_TIMEOUT);
-        
-        const response = await fetch(url, { 
+
+        const response = await fetch(url, {
             signal: controller.signal,
             headers: {
                 'User-Agent': 'TallmanChat/1.0'
             }
         });
         clearTimeout(timeoutId);
-        
+
         if (response.ok) {
-            const data = await response.json();
-            const results = [];
-            
-            // Extract results from DuckDuckGo response
-            if (data.AbstractURL && data.AbstractURL.includes(TALLMAN_SITE)) {
-                results.push({
-                    title: data.Heading || 'Tallman Equipment',
-                    link: data.AbstractURL,
-                    snippet: data.Abstract || data.AbstractText,
-                    source: 'duckduckgo'
-                });
-            }
-            
-            // Check related topics
-            if (data.RelatedTopics) {
-                for (const topic of data.RelatedTopics.slice(0, 5)) {
-                    if (topic.FirstURL && topic.FirstURL.includes(TALLMAN_SITE)) {
-                        results.push({
-                            title: topic.Text ? topic.Text.split(' - ')[0] : 'Related Product',
-                            link: topic.FirstURL,
-                            snippet: topic.Text,
-                            source: 'duckduckgo'
-                        });
+            const contentType = response.headers.get('content-type');
+            if (contentType && contentType.includes('application/json')) {
+                const data = await response.json();
+                const results = [];
+
+                // Extract results from DuckDuckGo response
+                if (data.AbstractURL && data.AbstractURL.includes(TALLMAN_SITE)) {
+                    results.push({
+                        title: data.Heading || 'Tallman Equipment',
+                        link: data.AbstractURL,
+                        snippet: data.Abstract || data.AbstractText,
+                        source: 'duckduckgo'
+                    });
+                }
+
+                // Check related topics
+                if (data.RelatedTopics) {
+                    for (const topic of data.RelatedTopics.slice(0, 5)) {
+                        if (topic.FirstURL && topic.FirstURL.includes(TALLMAN_SITE)) {
+                            results.push({
+                                title: topic.Text ? topic.Text.split(' - ')[0] : 'Related Product',
+                                link: topic.FirstURL,
+                                snippet: topic.Text,
+                                source: 'duckduckgo'
+                            });
+                        }
                     }
                 }
-            }
-            
-            if (results.length > 0) {
-                console.log(`✅ DuckDuckGo found ${results.length} results`);
-                return results;
+
+                if (results.length > 0) {
+                    console.log(`✅ DuckDuckGo found ${results.length} results`);
+                    return results;
+                }
+            } else {
+                console.log('⚠️ DuckDuckGo API returned non-JSON content');
             }
         }
-        
+
         // Fallback: Try DuckDuckGo HTML search with scraping
         return await scrapeDuckDuckGo(query);
-        
+
     } catch (error) {
         if (error.name === 'AbortError') {
             console.log('⏰ DuckDuckGo search timed out');
         } else {
             console.log('❌ DuckDuckGo search error:', error.message);
         }
-        return null;
+        return await scrapeDuckDuckGo(query); // Try scraping even on error
     }
 }
 
@@ -146,55 +151,64 @@ async function searchDuckDuckGo(query) {
 async function scrapeDuckDuckGo(query) {
     try {
         console.log('🔍 Trying DuckDuckGo HTML scrape...');
-        
+
         const searchQuery = `site:${TALLMAN_SITE} ${query}`;
         const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(searchQuery)}`;
-        
+
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), SEARCH_TIMEOUT);
-        
+
         const response = await fetch(url, {
             signal: controller.signal,
             headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
             }
         });
         clearTimeout(timeoutId);
-        
+
         if (response.ok) {
             const html = await response.text();
             const results = [];
-            
-            // Simple regex to extract results (avoiding full DOM parsing)
-            const linkRegex = /<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>([^<]*)<\/a>/gi;
-            const snippetRegex = /<a[^>]*class="result__snippet"[^>]*>([^<]*)<\/a>/gi;
-            
+
+            // Re-evaluating HTML structure from ddg_results.html:
+            // <h2 class="result__title"><a class="result__a" href="...">Title</a></h2>
+            // <a class="result__snippet" href="...">Snippet... <b>query</b> ...</a>
+
+            // More robust regex to match tags with nested content
+            const linkRegex = /<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi;
+            const snippetRegex = /<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/gi;
+
             let match;
             const links = [];
             const titles = [];
             const snippets = [];
-            
+
             while ((match = linkRegex.exec(html)) !== null) {
-                if (match[1].includes(TALLMAN_SITE) || match[1].includes('uddg=')) {
-                    // Decode DuckDuckGo redirect URL
-                    let actualUrl = match[1];
-                    if (actualUrl.includes('uddg=')) {
-                        const uddgMatch = actualUrl.match(/uddg=([^&]*)/);
-                        if (uddgMatch) {
-                            actualUrl = decodeURIComponent(uddgMatch[1]);
-                        }
-                    }
-                    if (actualUrl.includes(TALLMAN_SITE)) {
-                        links.push(actualUrl);
-                        titles.push(match[2].replace(/<[^>]*>/g, '').trim());
+                let actualUrl = match[1];
+
+                // Handle relative URLs if any (unlikely for DDG search results)
+                if (actualUrl.startsWith('//')) actualUrl = 'https:' + actualUrl;
+
+                // Decode DuckDuckGo redirect URL
+                if (actualUrl.includes('uddg=')) {
+                    const uddgMatch = actualUrl.match(/uddg=([^&]*)/);
+                    if (uddgMatch) {
+                        actualUrl = decodeURIComponent(uddgMatch[1]);
                     }
                 }
+
+                if (actualUrl.includes(TALLMAN_SITE)) {
+                    links.push(actualUrl);
+                    // Clean HTML tags from title
+                    titles.push(match[2].replace(/<[^>]*>/g, '').trim());
+                }
             }
-            
+
             while ((match = snippetRegex.exec(html)) !== null) {
+                // Clean HTML tags from snippet (like <b> tags)
                 snippets.push(match[1].replace(/<[^>]*>/g, '').trim());
             }
-            
+
             for (let i = 0; i < Math.min(links.length, 5); i++) {
                 results.push({
                     title: titles[i] || 'Tallman Equipment',
@@ -203,13 +217,13 @@ async function scrapeDuckDuckGo(query) {
                     source: 'duckduckgo-html'
                 });
             }
-            
+
             if (results.length > 0) {
                 console.log(`✅ DuckDuckGo HTML scrape found ${results.length} results`);
                 return results;
             }
         }
-        
+
         return null;
     } catch (error) {
         console.log('❌ DuckDuckGo HTML scrape error:', error.message);
@@ -226,14 +240,23 @@ async function scrapeDuckDuckGo(query) {
 function getHardcodedLinks(query) {
     const queryLower = query.toLowerCase();
     const links = [];
-    
+
     // Equipment categories
     const categories = [
         { keywords: ['bucket', 'aerial', 'lift', 'truck'], path: '/equipment/bucket-trucks', title: 'Bucket Trucks & Aerial Lifts' },
         { keywords: ['digger', 'derrick', 'drill'], path: '/equipment/digger-derricks', title: 'Digger Derricks' },
-        { keywords: ['cable', 'puller', 'tensioner', 'stringing'], path: '/equipment/cable-equipment', title: 'Cable Placing Equipment' },
+        { keywords: ['cable', 'puller', 'tensioner', 'stringing', 'block'], path: '/equipment/cable-equipment', title: 'Cable Placing & Stringing Equipment' },
         { keywords: ['trailer', 'reel'], path: '/equipment/trailers', title: 'Trailers & Reel Equipment' },
-        { keywords: ['tool', 'transmission', 'distribution'], path: '/equipment/tools', title: 'Line Tools & Equipment' },
+        { keywords: ['tool', 'transmission', 'distribution', 'lineman'], path: '/equipment/tools', title: 'Line Tools & Equipment' },
+        { keywords: ['ppe', 'glove', 'safety', 'helmet', 'hat', 'vest', 'eye', 'protection'], path: '/product-category/ppe/', title: 'Personal Protective Equipment (PPE)' },
+        { keywords: ['climb', 'belt', 'harness', 'lanyard', 'pole', 'fall'], path: '/product-category/climbing-gear/', title: 'Climbing Gear' },
+        { keywords: ['grounding', 'jumper', 'mat'], path: '/product-category/grounding-jumpering/', title: 'Grounding & Jumpering' },
+        { keywords: ['rigging', 'sling', 'hoist', 'rope', 'shackle'], path: '/product-category/rigging-lifting/', title: 'Rigging & Lifting' },
+        { keywords: ['hydraulic', 'pump', 'tamper', 'breaker'], path: '/product-category/hydraulic-tools-accessories/', title: 'Hydraulic Tools' },
+        { keywords: ['hand tool', 'wrench', 'plier', 'screwdriver', 'knife'], path: '/product-category/hand-tools/', title: 'Hand Tools' },
+        { keywords: ['underground', 'duct', 'rodder', 'mandrel'], path: '/product-category/underground-tools/', title: 'Underground Tools' },
+        { keywords: ['fiberglass', 'hotstick', 'measuring stick'], path: '/product-category/fiberglass-tools-accessories/', title: 'Fiberglass Tools & Sticks' },
+        { keywords: ['meter', 'tester', 'detector', 'multimeter'], path: '/product-category/meters-instruments/', title: 'Meters & Instruments' },
         { keywords: ['rent', 'rental'], path: '/rentals', title: 'Equipment Rentals' },
         { keywords: ['service', 'repair', 'maintenance'], path: '/services', title: 'Service & Repair' },
         { keywords: ['parts', 'replacement'], path: '/parts', title: 'Parts & Components' },
@@ -241,7 +264,7 @@ function getHardcodedLinks(query) {
         { keywords: ['contact', 'location', 'address', 'phone'], path: '/contact', title: 'Contact Us' },
         { keywords: ['about', 'company', 'history'], path: '/about', title: 'About Tallman Equipment' }
     ];
-    
+
     for (const cat of categories) {
         if (cat.keywords.some(kw => queryLower.includes(kw))) {
             links.push({
@@ -252,7 +275,7 @@ function getHardcodedLinks(query) {
             });
         }
     }
-    
+
     // Always include main site if no specific matches
     if (links.length === 0) {
         links.push({
@@ -262,7 +285,7 @@ function getHardcodedLinks(query) {
             source: 'hardcoded'
         });
     }
-    
+
     return links;
 }
 
@@ -275,29 +298,29 @@ function getHardcodedLinks(query) {
  */
 async function groundQuery(query, options = {}) {
     const { googleApiKey, googleSearchEngineId } = options;
-    
+
     console.log(`🌐 Grounding query: "${query.substring(0, 50)}..."`);
-    
+
     let results = null;
-    
+
     // Try Google Search first
     results = await searchGoogle(query, googleApiKey, googleSearchEngineId);
-    
+
     // Fallback to DuckDuckGo if Google failed or returned no results
     if (!results || results.length === 0) {
         console.log('🔄 Falling back to DuckDuckGo...');
         results = await searchDuckDuckGo(query);
     }
-    
+
     // Ultimate fallback to hardcoded links
     if (!results || results.length === 0) {
         console.log('📋 Using hardcoded links as fallback...');
         results = getHardcodedLinks(query);
     }
-    
+
     // Format results for inclusion in AI prompt
     const groundingContext = formatGroundingContext(results);
-    
+
     return {
         success: results && results.length > 0,
         results: results || [],
@@ -315,9 +338,9 @@ function formatGroundingContext(results) {
     if (!results || results.length === 0) {
         return '';
     }
-    
+
     let context = '\n\n📍 RELEVANT TALLMAN EQUIPMENT RESOURCES:\n';
-    
+
     for (const result of results.slice(0, 5)) {
         context += `\n• ${result.title}\n`;
         context += `  URL: ${result.link}\n`;
@@ -325,9 +348,9 @@ function formatGroundingContext(results) {
             context += `  Info: ${result.snippet.substring(0, 150)}...\n`;
         }
     }
-    
+
     context += '\nPlease include these links in your response when relevant to help the user find more information or make purchases.\n';
-    
+
     return context;
 }
 
@@ -341,26 +364,26 @@ function enhanceResponseWithLinks(response, results) {
     if (!results || results.length === 0) {
         return response;
     }
-    
+
     // Check if response already contains Tallman links
     if (response.includes('tallmanequipment.com')) {
         return response;
     }
-    
+
     // Add a helpful links section at the end
     let enhanced = response;
-    
+
     // Only add links if the response doesn't already have a resources section
-    if (!response.toLowerCase().includes('for more information') && 
+    if (!response.toLowerCase().includes('for more information') &&
         !response.toLowerCase().includes('visit our website') &&
         !response.toLowerCase().includes('learn more at')) {
-        
+
         enhanced += '\n\n**For more information:**\n';
         for (const result of results.slice(0, 3)) {
             enhanced += `- [${result.title}](${result.link})\n`;
         }
     }
-    
+
     return enhanced;
 }
 
