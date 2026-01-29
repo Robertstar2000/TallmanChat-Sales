@@ -52,6 +52,12 @@ async function searchGoogle(query, apiKey, searchEngineId) {
                 } else {
                     console.log('ℹ️ Google Search: No items found in results');
                 }
+            } else if (response.status === 403) {
+                console.log('❌ Google Search: 403 Forbidden. Possible causes:');
+                console.log('   1. Custom Search API not enabled in Google Cloud Console');
+                console.log('   2. Project missing billing account (even for free tier)');
+                console.log('   3. Daily quota of 100 free searches exceeded');
+                console.log('   Check: https://console.cloud.google.com/apis/library/customsearch.googleapis.com');
             } else {
                 console.log(`❌ Google Search: API responded with status ${response.status}`);
             }
@@ -130,7 +136,7 @@ async function searchDuckDuckGo(query) {
                     return results;
                 }
             } else {
-                console.log('⚠️ DuckDuckGo API returned non-JSON content');
+                console.log('⚠️ DuckDuckGo API returned non-JSON content. Likely being challenged as a bot.');
             }
         }
 
@@ -165,13 +171,23 @@ async function scrapeDuckDuckGo(query) {
         const response = await fetch(url, {
             signal: controller.signal,
             headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache'
             }
         });
         clearTimeout(timeoutId);
 
         if (response.ok) {
             const html = await response.text();
+
+            if (html.includes('Unfortunately, bots use DuckDuckGo too')) {
+                console.log('⛔ DuckDuckGo blocked the scrape (Bot Challenge)');
+                return null;
+            }
+
             const results = [];
 
             // Re-evaluating HTML structure from ddg_results.html:
