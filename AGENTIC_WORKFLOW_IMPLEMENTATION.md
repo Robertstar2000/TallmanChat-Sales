@@ -107,10 +107,9 @@ Final Step: Writer Agent
 const MAX_QA_LOOPS = 3; // In agentWorkflow.ts
 ```
 
-### Ollama Settings
+### OpenAI Settings
 Uses settings from localStorage:
-- `ollamaHost` (default: http://localhost:11434)
-- `ollamaModel` (default: llama3.2)
+- `openaiModel` (default: gpt-5.2)
 
 ## Error Handling
 
@@ -169,7 +168,7 @@ Expected: QA catches and fixes, max 3 loops
 
 ## Limitations
 
-- Requires Ollama running
+- Requires OpenAI API Key
 - Sequential execution (not parallel)
 - Max 3 QA loops per step
 - No human approval (fully automated)

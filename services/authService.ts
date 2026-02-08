@@ -1,5 +1,6 @@
 import { User, UserRole } from '../types';
 import { safeLocalStorage } from './storageService';
+import { getApiUrl } from './config';
 
 const USERS_STORAGE_KEY = 'dashboard_users';
 
@@ -7,47 +8,47 @@ const USERS_STORAGE_KEY = 'dashboard_users';
 const ADMIN_USERS = ['BobM', 'robertstar'];
 
 export const getUsers = async (): Promise<User[]> => {
-    try {
-        const usersJson = safeLocalStorage.getItem(USERS_STORAGE_KEY);
-        return usersJson ? JSON.parse(usersJson) : [];
-    } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.error("Failed to parse users from storage. Returning empty array.", message);
-        return [];
-    }
+  try {
+    const usersJson = safeLocalStorage.getItem(USERS_STORAGE_KEY);
+    return usersJson ? JSON.parse(usersJson) : [];
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("Failed to parse users from storage. Returning empty array.", message);
+    return [];
+  }
 };
 
 
 export const addUser = async (newUser: User): Promise<User> => {
-    const users = await getUsers();
-    const usernameExists = users.some(u => u.username.toLowerCase() === newUser.username.toLowerCase());
-    if (usernameExists) {
-        throw new Error(`User with username '${newUser.username}' already exists.`);
-    }
+  const users = await getUsers();
+  const usernameExists = users.some(u => u.username.toLowerCase() === newUser.username.toLowerCase());
+  if (usernameExists) {
+    throw new Error(`User with username '${newUser.username}' already exists.`);
+  }
 
-    users.push(newUser);
-    safeLocalStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(users));
-    return newUser;
+  users.push(newUser);
+  safeLocalStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(users));
+  return newUser;
 };
 
 export const updateUser = async (username: string, updates: Partial<User>): Promise<User> => {
-    let users = await getUsers();
-    const userIndex = users.findIndex(u => u.username.toLowerCase() === username.toLowerCase());
-    if (userIndex === -1) {
-        throw new Error('User not found.');
-    }
-    users[userIndex] = { ...users[userIndex], ...updates };
-    safeLocalStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(users));
-    return users[userIndex];
+  let users = await getUsers();
+  const userIndex = users.findIndex(u => u.username.toLowerCase() === username.toLowerCase());
+  if (userIndex === -1) {
+    throw new Error('User not found.');
+  }
+  users[userIndex] = { ...users[userIndex], ...updates };
+  safeLocalStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(users));
+  return users[userIndex];
 };
 
 export const deleteUser = async (username: string): Promise<void> => {
-    let users = await getUsers();
-    const filteredUsers = users.filter(u => u.username.toLowerCase() !== username.toLowerCase());
-    if (users.length === filteredUsers.length) {
-        throw new Error('User not found.');
-    }
-    safeLocalStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(filteredUsers));
+  let users = await getUsers();
+  const filteredUsers = users.filter(u => u.username.toLowerCase() !== username.toLowerCase());
+  if (users.length === filteredUsers.length) {
+    throw new Error('User not found.');
+  }
+  safeLocalStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(filteredUsers));
 };
 
 // Email domain validation
@@ -59,7 +60,7 @@ const validateEmailDomain = (email: string): boolean => {
 // LDAP Authentication function
 const authenticateWithLDAP = async (username: string, password: string): Promise<any> => {
   try {
-    const response = await fetch('/api/ldap-auth', {
+    const response = await fetch(getApiUrl('/api/ldap-auth'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -124,7 +125,7 @@ export const login = async (email: string, password: string): Promise<{ success:
   // TEMPORARY: Email/Password authentication (primary method)
   console.log('🔐 Attempting email/password authentication for:', email);
   try {
-    const response = await fetch('/api/auth/login', {
+    const response = await fetch(getApiUrl('/api/auth/login'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -200,25 +201,25 @@ export const login = async (email: string, password: string): Promise<{ success:
 
 
 export const logout = (): void => {
-    localStorage.removeItem('currentUser');
+  localStorage.removeItem('currentUser');
 };
 
 export const getCurrentUser = (): User | null => {
-    try {
-        const userJson = localStorage.getItem('currentUser');
-        console.log('💾 Raw user data from localStorage:', userJson);
+  try {
+    const userJson = localStorage.getItem('currentUser');
+    console.log('💾 Raw user data from localStorage:', userJson);
 
-        if (userJson) {
-            const user = JSON.parse(userJson);
-            console.log('✅ Parsed current user:', user);
-            console.log('� User role:', user.role);
-            return user;
-        } else {
-            console.log('❌ No user data found in localStorage');
-        }
-    } catch (e) {
-        console.error("❌ Failed to parse user from localStorage", e);
-        localStorage.removeItem('currentUser');
+    if (userJson) {
+      const user = JSON.parse(userJson);
+      console.log('✅ Parsed current user:', user);
+      console.log('� User role:', user.role);
+      return user;
+    } else {
+      console.log('❌ No user data found in localStorage');
     }
-    return null;
+  } catch (e) {
+    console.error("❌ Failed to parse user from localStorage", e);
+    localStorage.removeItem('currentUser');
+  }
+  return null;
 };

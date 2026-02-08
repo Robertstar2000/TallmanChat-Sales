@@ -77,4 +77,28 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 ENTRYPOINT ["docker-entrypoint.sh"]
 
 # Default command - starts all services
+# Default command - starts all services
 CMD ["sh", "-c", "node server/main-server.js & node server/granite-api.js & node server/backend-server.js"]
+
+# ===========================================
+# Stage 3: Development env
+# ===========================================
+FROM frontend-build AS development
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    netcat-openbsd \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install server dependencies (including dev)
+COPY server/package*.json ./server/
+RUN cd server && npm install
+
+# Expose ports
+EXPOSE 3230 3231 12435
+
+# Default command
+CMD ["sh", "-c", "npm run dev & node server/backend-server.js"]

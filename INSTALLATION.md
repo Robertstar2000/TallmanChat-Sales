@@ -9,11 +9,10 @@ This guide provides complete installation instructions for deploying Tallman Cha
 Docker Compose Multi-Service Setup
 ├── tallman-chat (Main Container)
 │   ├── Frontend: React SPA (Port 3230)
-│   ├── Backend: Express.js API (Port 3231)
-│   └── Granite API Bridge (Port 12435)
+│   └── Backend: Express.js API (Port 3231)
 ├── AI Models:
-│   ├── Primary: Google Gemini 2.0 Flash (Cloud API)
-│   └── Secondary: Docker Granite 4.0 Nano (Local)
+│   ├── Primary: OpenAI GPT-5.2 (Cloud API)
+│   └── Secondary: Google Gemini (Cloud API)
 └── Authentication: LDAP/Active Directory
 ```
 
@@ -23,7 +22,7 @@ Docker Compose Multi-Service Setup
 
 ### **Server IPs & Ports**
 - **Application Server**: `10.10.20.9`
-- **Ollama AI Server**: `10.10.20.24`
+
 - **Domain Controller**: `10.10.20.253` (DC02.tallman.com)
 
 ### **Port Mapping**
@@ -31,7 +30,6 @@ Docker Compose Multi-Service Setup
 |---------|------|------------------|---------|
 | UI (React) | 3230 | External | Web interface |
 | API (Express) | 3231 | Internal | Backend API |
-| Granite Bridge | 12435 | Internal | AI model bridge |
 | LDAP | 3100 | Internal | Authentication |
 
 ---
@@ -42,16 +40,10 @@ Docker Compose Multi-Service Setup
 - **Windows 10/11 or Windows Server 2019+**
 - **Docker Desktop** with WSL2 integration
 - **Git** for version control
-- **Google Gemini API key** (for primary AI model)
+- **Git** for version control
+- **OpenAI API key** (for primary AI model)
 
-### **AI Service Setup**
-```bash
-# Install Docker AI models (if not already available)
-docker model pull ai/granite-4.0-nano:latest
 
-# Verify models
-docker model ls
-```
 
 ---
 
@@ -70,20 +62,13 @@ cd TallmanChat-Sales
 cp .env.docker .env.docker.local
 
 # Edit .env.docker.local with your settings:
-# - Google Gemini API key
+# - OpenAI API key
 # - LDAP server details (if using authentication)
 ```
 
-### **Step 3: Install AI Models**
-```bash
-# Ensure Docker AI models are available
-docker model ls
 
-# If Granite model not available:
-docker model pull ai/granite-4.0-nano:latest
-```
 
-### **Step 4: Start Docker Services**
+### **Step 3: Start Docker Services**
 ```bash
 # Start all services
 docker-compose up -d
@@ -92,7 +77,7 @@ docker-compose up -d
 docker ps
 ```
 
-### **Step 5: Verify Installation**
+### **Step 4: Verify Installation**
 ```bash
 # Test UI access
 curl http://localhost:3230
@@ -129,18 +114,18 @@ const LDAP_CONFIG = {
 
 ## 🤖 **AI Model Configuration**
 
-### **Primary AI Model** (Google Gemini)
+### **Primary AI Model** (OpenAI)
 ```bash
 # Configure in .env.docker
-GEMINI_API_KEY=your_google_gemini_api_key_here
-GEMINI_MODEL=gemini-2.0-flash-exp
+OPENAI_API_KEY=your_openai_api_key
+OPENAI_MODEL=gpt-5.2
 ```
 
-### **Secondary AI Model** (Docker Granite)
+### **Secondary AI Model** (Gemini)
 ```bash
 # Configure in .env.docker
-SECONDARY_LLM_BASE_URL=http://host.docker.internal:12435/v1
-SECONDARY_LLM_MODEL=granite-4.0-nano
+GEMINI_API_KEY=your_gemini_key
+GEMINI_MODEL=gemini-2.0-flash-exp
 ```
 
 ### **System Instructions**
@@ -223,7 +208,6 @@ Installed automatically during service setup:
 ### **Production URLs**
 - **Direct Access**: `http://localhost:3230`
 - **API Access**: `http://localhost:3231/api`
-- **Granite API**: `http://localhost:12435/v1/chat/completions`
 
 ### **API Endpoints**
 - `GET /api/health` - Service health check
@@ -242,7 +226,7 @@ Installed automatically during service setup:
 ### **Environment Variables**
 ```bash
 # Secure API keys in .env.docker (not committed to git)
-GEMINI_API_KEY=your_secure_api_key_here
+OPENAI_API_KEY=your_secure_api_key_here
 
 # LDAP credentials (if used)
 LDAP_BIND_PASSWORD=your_secure_password
@@ -289,8 +273,7 @@ curl -X POST http://localhost:3231/api/llm-test
 ### **Common Issues**
 1. **Container not starting**: Check Docker Desktop is running
 2. **Port conflicts**: Check with `netstat -ano | findstr ":3230"`
-3. **Gemini API key invalid**: Verify key in `.env.docker`
-4. **Granite model not found**: Run `docker model pull ai/granite-4.0-nano:latest`
+3. **OpenAI API key invalid**: Verify key in `.env.docker`
 5. **Authentication fails**: Check LDAP server connectivity
 
 ### **Reset Procedures**
@@ -312,7 +295,6 @@ docker-compose logs
 - [ ] Docker Desktop installed and running
 - [ ] Repository cloned to `c:\Users\rober\TallmanChat\TallmanChat-Sales`
 - [ ] Environment configured in `.env.docker`
-- [ ] Docker AI models available (`docker model ls`)
 - [ ] Containers built and running (`docker-compose up -d`)
 - [ ] UI accessible at `http://localhost:3230`
 - [ ] API responding at `http://localhost:3231/api/health`

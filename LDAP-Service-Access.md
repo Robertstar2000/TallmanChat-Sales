@@ -51,7 +51,7 @@ This document captures the complete LDAP authentication implementation learned t
 
 #### **Service Architecture:**
 - **Frontend**: `http://localhost:3200` (React + Vite dev server)
-- **Backend API**: `http://localhost:3210` (Main API server with Ollama)
+- **Backend API**: `http://localhost:3210` (Main API server with OpenAI)
 - **LDAP Auth**: `http://localhost:3100` (LDAP authentication service)
 
 #### **API Endpoints** (All available on port 3210)
@@ -62,7 +62,7 @@ POST /api/auth/login                # LDAP User authentication
 GET  /api/ldap-test                 # LDAP connectivity test
 
 # Chat & AI
-POST /api/ollama/chat               # AI chat completion
+POST /api/openai/chat               # AI chat completion
 POST /api/chat/send                 # Send chat message
 POST /api/chat/stream               # Streaming chat
 
@@ -283,7 +283,7 @@ Keep Windows services as option but provide direct Node.js fallback for developm
 
 ### **Final Service Configuration:**
 - **Frontend React App**: `http://localhost:3200` (Vite dev server)
-- **Backend API Server**: `http://localhost:3210` (Main API with Ollama)
+- **Backend API Server**: `http://localhost:3210` (Main API with OpenAI)
 - **LDAP Auth Server**: `http://localhost:3100` (LDAP authentication)
 - **Production UI Server**: `http://localhost:3220` (Built React app & proxy)
 

@@ -31,7 +31,7 @@ When you try to use the agent workflow:
 ## What You're Actually Using
 
 The current system is a **simple chat application** with:
-- Single LLM conversation (Ollama)
+- Single LLM conversation (OpenAI)
 - Knowledge base RAG
 - Message history
 - No multi-agent workflow

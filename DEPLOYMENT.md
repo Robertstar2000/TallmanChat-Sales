@@ -28,7 +28,6 @@ This document provides comprehensive deployment instructions for the Tallman Cha
 |---------|-----|------|
 | **UI Server** | `http://localhost:3230` | 3230 |
 | **Backend API** | `http://localhost:3231/api` | 3231 |
-| **Granite API Bridge** | `http://localhost:12435` | 12435 |
 | **Health Check** | `http://localhost:3231/api/health` | 3231 |
 
 ### Docker Swarm (Production)
@@ -110,8 +109,8 @@ All persistent data must reside on the NFS share (`/var/data`) for cross-node po
 cp .env.example .env.docker
 
 # Edit with your configuration
-# Required: GEMINI_API_KEY
-# Optional: LDAP settings, Ollama configuration
+# Required: OPENAI_API_KEY
+# Optional: GEMINI_API_KEY (Secondary), LDAP settings
 ```
 
 ### Step 2: Build and Start
@@ -338,6 +337,7 @@ docker service update --force tallmanchat_tallman-chat
 | Health check failing | Verify API is responding | Check `docker service ps --no-trunc` |
 | Can't connect to LDAP | Verify `host.docker.internal` works | Check LDAP_SERVICE_HOST IP |
 | Gemini API errors | Verify API key in `.env.docker` | Check environment in stack |
+| OpenAI API errors | Verify OPENAI_API_KEY | Check internet access |
 
 ### Debug Commands
 

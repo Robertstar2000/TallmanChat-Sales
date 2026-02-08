@@ -50,11 +50,10 @@ const Sidebar: React.FC<SidebarProps> = ({
               <div key={chat.id} className="group relative">
                 <button
                   onClick={() => onSelectChat(chat.id)}
-                  className={`w-full text-left text-sm p-2 rounded-md truncate transition-colors ${
-                    activeChatId === chat.id
+                  className={`w-full text-left text-sm p-2 rounded-md truncate transition-colors ${activeChatId === chat.id
                       ? 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white'
                       : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200/50 dark:hover:bg-gray-700/50 hover:text-gray-900 dark:hover:text-white'
-                  }`}
+                    }`}
                 >
                   {chat.title}
                 </button>
@@ -83,13 +82,13 @@ const Sidebar: React.FC<SidebarProps> = ({
           Logged in as: <span className="font-semibold">{user?.username}</span>
         </div>
         {user?.role === 'admin' && (
-             <button
-                onClick={onNavigateToAdmin}
-                className="w-full flex items-center justify-center gap-2 text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700/50 font-semibold py-2 px-3 rounded-lg transition-colors duration-200"
-                >
-                <CogIcon className="w-4 h-4" />
-                Admin Panel
-            </button>
+          <button
+            onClick={onNavigateToAdmin}
+            className="w-full flex items-center justify-center gap-2 text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700/50 font-semibold py-2 px-3 rounded-lg transition-colors duration-200"
+          >
+            <CogIcon className="w-4 h-4" />
+            Admin Panel
+          </button>
         )}
         <button
           onClick={onClearAllChats}
@@ -112,6 +111,9 @@ const Sidebar: React.FC<SidebarProps> = ({
           <LogoutIcon className="w-4 h-4" />
           Logout
         </button>
+        <div className="text-center pt-2">
+          <span className="text-xs text-gray-400 dark:text-gray-600">Tallman v:1.0.0</span>
+        </div>
       </div>
     </aside>
   );

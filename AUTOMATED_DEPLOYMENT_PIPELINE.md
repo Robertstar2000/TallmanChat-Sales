@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document describes an automated CI/CD pipeline for deploying the Tallman Chat application to the `tallman.com` domain with IIS frontend, Node.js backend services, Ollama integration, and future LDAP authentication.
+This document describes an automated CI/CD pipeline for deploying the Tallman Chat application to the `tallman.com` domain with IIS frontend, Node.js backend services, OpenAI integration, and future LDAP authentication.
 
 ## Architecture Components
 
@@ -16,7 +16,7 @@ This document describes an automated CI/CD pipeline for deploying the Tallman Ch
 ### Backend Services
 - **Main API Server**: Node.js/Express (Port 3001)
 - **LDAP Auth Service**: Node.js/Express (Port 3002) 
-- **Ollama Service**: Local AI model server (Port 11434)
+- **OpenAI Integration**: Cloud API Integration
 - **Service Management**: Windows Services via NSSM
 
 ### Infrastructure
@@ -53,7 +53,7 @@ Testing:
 1. Unit tests (Jest/Vitest)
 2. Integration tests
 3. LDAP connectivity tests
-4. Ollama service tests
+4. OpenAI connectivity tests
 5. Security scans
 6. Performance tests
 ```
@@ -200,7 +200,6 @@ if (Test-Path $DeploymentPath) {
 Write-Host "Stopping services..." -ForegroundColor Yellow
 Stop-Service -Name "TallmanChatMain" -ErrorAction SilentlyContinue
 Stop-Service -Name "TallmanChatLDAP" -ErrorAction SilentlyContinue
-Stop-Service -Name "TallmanChatOllama" -ErrorAction SilentlyContinue
 
 # Extract and deploy
 Write-Host "Deploying new version..." -ForegroundColor Yellow
@@ -222,7 +221,6 @@ Copy-Item -Path "$DeploymentPath\server\*" -Destination $ServicePath -Recurse -F
 Write-Host "Starting services..." -ForegroundColor Yellow
 Start-Service -Name "TallmanChatMain"
 Start-Service -Name "TallmanChatLDAP"
-Start-Service -Name "TallmanChatOllama"
 
 # Health check
 Write-Host "Performing health checks..." -ForegroundColor Yellow
@@ -264,14 +262,7 @@ Write-Host "Setting up TallmanChatLDAP service..." -ForegroundColor Yellow
 & $NSSMPath set TallmanChatLDAP AppStdout "$ServicePath\logs\ldap-service.log"
 & $NSSMPath set TallmanChatLDAP AppStderr "$ServicePath\logs\ldap-service-error.log"
 
-# Ollama Service (if not already installed)
-Write-Host "Setting up Ollama service..." -ForegroundColor Yellow
-if (-not (Get-Service -Name "Ollama" -ErrorAction SilentlyContinue)) {
-    # Download and install Ollama
-    $OllamaInstaller = "$env:TEMP\ollama-windows-amd64.exe"
-    Invoke-WebRequest -Uri "https://ollama.ai/download/ollama-windows-amd64.exe" -OutFile $OllamaInstaller
-    Start-Process -FilePath $OllamaInstaller -ArgumentList "/S" -Wait
-}
+
 
 Write-Host "Services setup completed!" -ForegroundColor Green
 ```
@@ -433,8 +424,7 @@ $EnvContent = @"
 NODE_ENV=production
 PORT=3001
 LDAP_PORT=3002
-OLLAMA_URL=http://localhost:11434
-GEMINI_API_KEY=$env:GEMINI_API_KEY
+OPENAI_API_KEY=$env:OPENAI_API_KEY
 LDAP_URL=$env:LDAP_URL
 LDAP_BIND_DN=$env:LDAP_BIND_DN
 LDAP_BIND_PASSWORD=$env:LDAP_BIND_PASSWORD

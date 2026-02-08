@@ -1,43 +1,53 @@
 # Tallman Chat - AI Assistant for Tallman Equipment Company
 
-An advanced AI-powered chat application designed specifically for Tallman Equipment Company, utilizing Google Gemini and Docker Granite AI models with RAG (Retrieval-Augmented Generation) for accurate responses about company products, services, and industry knowledge.
+An advanced AI-powered chat application designed specifically for Tallman Equipment Company, utilizing **OpenAI GPT-5.2** as the primary intelligence engine, supported by Google Gemini for robust fallback capabilities. The system features RAG (Retrieval-Augmented Generation) for accurate responses about company products, services, and industry knowledge.
 
-**Project Location**: `c:\Users\rober\TallmanChat\TallmanChat-Sales\`
+## 📍 **Project Information**
+
+- **URLs**:
+  - **Docker Desktop UI**: `http://localhost:3230`
+  - **Docker Desktop API**: `http://localhost:3231`
+  - **Local Dev UI**: `http://localhost:5173`
+  - **Local Dev API**: `http://localhost:3210`
+- **Ports**:
+  - **UI**: 3230 (Docker) / 5173 (Local)
+  - **API**: 3231 (Docker) / 3210 (Local)
+- **Source Code**: `c:\Users\rober\TallmanChat\TallmanChat-Sales-1`
+- **GitHub**: `https://github.com/Robertstar2000/TallmanChat-Sales`
 
 ## 🏗️ **Architecture Overview**
 
 ### **Current Production Setup (Docker-based)**
 - **Containerization**: Docker Compose with multi-service architecture
-- **Frontend**: React SPA served by Node.js (port 3230)
+- **Frontend**: React SPA served by Node.js/Vite (port 3230)
 - **Backend**: Express.js API server (port 3231)
 - **AI Models**:
-  - **Primary**: Google Gemini 2.0 Flash (experimental) - External API
-  - **Secondary**: Docker Granite 4.0 Nano - Local Docker AI
-  - **Fallback**: Intelligent failover between models
-- **Database**: In-memory storage with persistent knowledge base
+  - **Primary**: **OpenAI GPT-5.2** (via API)
+  - **Secondary**: Google Gemini 2.0 Flash (via API)
+  - **Fallback**: Intelligent failover system
+- **Database**: Native JSON Persistence (NoSQL-like) for portable/local storage
 - **Authentication**: LDAP/Active Directory (`host.docker.internal:3100`)
 - **Reverse Proxy**: Built-in Express proxy for API routing
 
 ### **Docker Services**
-- **tallman-chat**: Main application container
-  - Ports: 3230 (UI), 3231 (API), 12435 (Granite API bridge)
-  - Volumes: Docker socket access, logs directory
-  - Environment: Production Node.js with Docker integration
+- **app**: Main application container (monolithic stack for Desktop)
+  - Ports: 3230 (UI), 3231 (API)
+  - Volumes: Local code mount for development
+  - Environment: Development/Production hybrid for Desktop
 
 ### **URLs & Access**
-- **Production UI**: `http://localhost:3230`
+- **UI Access**: `http://localhost:3230`
 - **Backend API**: `http://localhost:3231/api`
-- **Granite API Bridge**: `http://localhost:12435/v1/chat/completions`
-- **Health Check**: `/api/health` endpoint
+- **Health Check**: `http://localhost:3231/api/health`
 
 ### **Key Features**
 - 🔐 Active Directory authentication
-- 🧠 Dual AI models (Gemini + Granite) with intelligent fallback
+- 🧠 **OpenAI GPT-5.2** Integration
 - 📚 RAG-powered knowledge base
 - 👥 Multi-user chat storage
 - 🎯 Industry-specific responses
 - 🔍 Intelligent knowledge retrieval (RAG)
-- 🌐 Real-time Web Grounding (Google Search + DuckDuckGo)
+- 🌐 Real-time Web Grounding
 - 🐳 Docker containerization for easy deployment
 
 ---
@@ -64,7 +74,7 @@ An advanced AI-powered chat application designed specifically for Tallman Equipm
 |---------|-----|------|
 | UI Server | `http://localhost:3230` | 3230 |
 | Backend API | `http://localhost:3231/api` | 3231 |
-| Granite API | `http://localhost:12435` | 12435 |
+
 | Health Check | `http://localhost:3231/api/health` | 3231 |
 
 ### Docker Swarm (Production)
@@ -136,20 +146,21 @@ An advanced AI-powered chat application designed specifically for Tallman Equipm
 ### **Prerequisites**
 - Node.js 18.17.0+
 - npm
-- Ollama server running
+- OpenAI API Key configured
 
-### **Local Development Configuration (.env.local)**
+### **Local Development Configuration (.env)**
 ```bash
-# Ollama Configuration
-OLLAMA_HOST=10.10.20.24:11434
-OLLAMA_MODEL=llama3.3:latest
+# OpenAI Configuration
+OPENAI_API_KEY=your_key_here
+OPENAI_MODEL=gpt-5.2
 
 # LDAP Configuration
 LDAP_SERVICE_HOST=127.0.0.1
 LDAP_SERVICE_PORT=3100
 
 # Ports
-PORT=3200
+PORT=3210
+UI_PORT=5173
 ```
 
 ### **Start Development Server**
@@ -160,7 +171,7 @@ npm install
 # Start development server
 npm run dev
 
-# Access at: http://localhost:3200
+# Access at: http://localhost:5173
 ```
 
 ---
@@ -174,7 +185,7 @@ npm run dev
 ### **Chat & AI**
 - `POST /api/chat/send` - Send chat messages with AI responses
 - `POST /api/chat/stream` - Streaming chat responses
-- `POST /api/ollama/chat` - Legacy Ollama chat endpoint (deprecated)
+
 - `POST /api/llm-test` - Test LLM connectivity and fallback
 
 ### **Knowledge Base**
@@ -205,17 +216,15 @@ net start TallmanChatBackend
 net stop TallmanChatBackend
 
 # View service logs
-nssm view TallmanChatBackend AppStdout
-nssm view TallmanChatBackend AppStderr
-```
+# Service commands remain similar, check backend output
+
 
 ### **Troubleshooting**
 ```bash
 # Check if ports are listening
 netstat -ano | findstr :3215
 
-# Test Ollama connectivity
-curl http://10.10.20.24:11434/api/tags
+
 
 # Test LDAP connectivity
 curl http://127.0.0.1:3100/health
@@ -234,7 +243,7 @@ curl http://127.0.0.1:3100/health
 
 ### **AI Models Available**
 - **Google Gemini 2.0 Flash (experimental)**: Cloud-based, fast responses
-- **Docker Granite 4.0 Nano**: 3.04GB local model, privacy-focused
+
 - **Automatic Fallback**: Seamless switching between models
 
 ---
@@ -247,10 +256,9 @@ curl http://127.0.0.1:3100/health
 3. Restart backend service: `net stop TallmanChatBackend && net start TallmanChatBackend`
 4. IIS automatically serves updated frontend files
 
-### **Model Updates**
-```bash
-# On Ollama server (10.10.20.24)
-ollama pull llama3.3:latest  # Update to latest model
+# Model Updates
+Models are managed via OpenAI API. No local update required for GPT-5.2.
+Gemini models are also API-based.
 ```
 
 ### **Knowledge Base Updates**
@@ -288,7 +296,7 @@ ollama pull llama3.3:latest  # Update to latest model
 ### **Scaling Options**
 - Load balancing multiple backend services
 - Redis for session management (future)
-- Additional Ollama servers for redundancy
+
 
 ---
 
@@ -302,16 +310,17 @@ ollama pull llama3.3:latest  # Update to latest model
 ### **Common Issues**
 
 **"AI not responding"**
-- Check Ollama server: `curl http://10.10.20.24:11434/api/tags`
-- Verify backend service is running
+- Verify `OPENAI_API_KEY` in `.env` or `.env.docker`
+- Check backend logs: `docker-compose logs app`
+- Verify internet connectivity
 
 **"Login failing"**
 - Test LDAP connectivity
 - Check service account credentials
 
 **"UI not loading"**
-- Test IIS: `http://localhost`
-- Check reverse proxy configuration
+- Docker: Check `http://localhost:3230`
+- Local: Check `http://localhost:5173`
 
 ---
 
